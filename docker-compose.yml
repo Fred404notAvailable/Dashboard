@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16
+    container_name: pyros_db
+    environment:
+      POSTGRES_DB: registrations
+      POSTGRES_USER: pyros
+      POSTGRES_PASSWORD: pyros_dev_2026
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/src/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./backend/src/database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+
+  redis:
+    image: redis:7-alpine
+    container_name: pyros_redis
+    ports:
+      - '6379:6379'
+
+volumes:
+  pgdata:
