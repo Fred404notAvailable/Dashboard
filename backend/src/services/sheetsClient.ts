@@ -127,9 +127,17 @@ export function parseSheetDate(raw: string | undefined): string | null {
   return null;
 }
 
-/** Stable SHA-256 hash for dedup */
-export function hashRow(tab: string, values: string[]): string {
-  return crypto.createHash('sha256').update(`${tab}|${JSON.stringify(values)}`).digest('hex');
+/** Stable SHA-256 hash for dedup based on normalized registration fields */
+export function hashRow(tab: string, parsed: RegistrationRow): string {
+  const payload = [
+    tab,
+    parsed.sNo ?? '',
+    (parsed.registrantName || '').toLowerCase().trim(),
+    (parsed.regNo || '').toLowerCase().trim(),
+    (parsed.mobileNo || '').trim(),
+    parsed.registrationDate || '',
+  ].join('|');
+  return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
 /**
@@ -314,7 +322,7 @@ export async function performSync(): Promise<SyncResult> {
         continue;
       }
 
-      const hash = hashRow(tab, rawValues);
+      const hash = hashRow(tab, parsed);
 
       try {
         const action = await upsertRow(parsed, hash);

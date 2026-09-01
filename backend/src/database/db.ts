@@ -65,7 +65,12 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
   // 1. Insert / Upsert into registrations
   if (normalized.startsWith('INSERT INTO REGISTRATIONS')) {
     const hash = params[13] || `hash_${Date.now()}_${Math.random()}`;
-    const existingIndex = MOCK_REGISTRATIONS.findIndex(r => r.source_row_hash === hash);
+    const sNo = params[0] || null;
+    const name = String(params[2] || '').trim().toLowerCase();
+    const type = Number(params[12]) || 200;
+    const existingIndex = MOCK_REGISTRATIONS.findIndex(
+      r => r.source_row_hash === hash || (r.registration_type === type && r.s_no === sNo && r.registrant_name.trim().toLowerCase() === name)
+    );
 
     const record: MockRegistration = {
       id: String(existingIndex >= 0 ? MOCK_REGISTRATIONS[existingIndex].id : MOCK_REGISTRATIONS.length + 1),
