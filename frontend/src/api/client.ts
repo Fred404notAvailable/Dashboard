@@ -1,6 +1,22 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export const getApiBase = (): string => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    const { hostname, protocol } = window.location;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      if (hostname.endsWith('vercel.app')) {
+        return '';
+      }
+      return `${protocol}//${hostname}:3000`;
+    }
+  }
+  return 'http://localhost:3000';
+};
+
+const API_BASE = getApiBase();
 
 const api = axios.create({
   baseURL: API_BASE,

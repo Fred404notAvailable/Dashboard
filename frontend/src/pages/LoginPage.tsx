@@ -20,7 +20,11 @@ export default function LoginPage() {
       await login(email, password);
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed. Please check your credentials.');
+      if (!err.response || err.message === 'Network Error') {
+        setError('Cannot connect to backend API server. Please verify backend is running & reachable.');
+      } else {
+        setError(err.response?.data?.error || 'Login failed. Please check your credentials.');
+      }
     } finally {
       setLoading(false);
     }
