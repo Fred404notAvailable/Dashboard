@@ -23,8 +23,12 @@ const app = Fastify({
 const start = async () => {
   // Plugins
   await app.register(cors, {
-    origin: config.nodeEnv === 'production' ? false : true,
+    origin: (origin, cb) => {
+      cb(null, true);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept', 'X-Requested-With'],
   });
 
   await app.register(cookie);
