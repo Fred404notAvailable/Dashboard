@@ -267,10 +267,12 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
 
   // 15. PDF / KPI Total count query
   if (normalized.includes('SELECT COUNT(*) AS TOTAL,') && normalized.includes('SUM(CASE WHEN REGISTRATION_TYPE = 200')) {
-    const targetDate = params[0];
-    const filtered = targetDate
-      ? MOCK_REGISTRATIONS.filter(r => r.registration_date === targetDate)
-      : MOCK_REGISTRATIONS;
+    let filtered = [...MOCK_REGISTRATIONS];
+    if (params.length === 1 && /^\d{4}-\d{2}-\d{2}$/.test(params[0])) {
+      filtered = filtered.filter(r => r.registration_date === params[0]);
+    } else if (params.length >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(params[0]) && /^\d{4}-\d{2}-\d{2}$/.test(params[1])) {
+      filtered = filtered.filter(r => r.registration_date >= params[0] && r.registration_date <= params[1]);
+    }
     const t200 = filtered.filter(r => r.registration_type === 200).length;
     const t250 = filtered.filter(r => r.registration_type === 250).length;
     return {

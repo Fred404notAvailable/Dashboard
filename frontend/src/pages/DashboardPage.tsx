@@ -284,6 +284,9 @@ export default function DashboardPage() {
     }
   };
 
+  const currentPresetObj = PRESETS.find(p => p.key === filters.preset);
+  const currentRangeLabel = currentPresetObj ? currentPresetObj.label : `${filters.startDate} to ${filters.endDate}`;
+
   const handleDownloadPdf = async () => {
     setDownloadingPdf(true);
     try {
@@ -295,7 +298,10 @@ export default function DashboardPage() {
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.setAttribute('download', `FAC_PYROS_Report_${filters.endDate || filters.startDate}.pdf`);
+      const filename = filters.startDate === filters.endDate
+        ? `FAC_PYROS_Report_${filters.startDate}.pdf`
+        : `FAC_PYROS_Report_${filters.startDate}_to_${filters.endDate}.pdf`;
+      a.setAttribute('download', filename);
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
@@ -557,10 +563,10 @@ export default function DashboardPage() {
             className="btn btn--secondary btn--sm"
             onClick={handleDownloadPdf}
             disabled={downloadingPdf}
-            title="Download Daily PDF Report"
+            title={`Download PDF Report for ${currentRangeLabel}`}
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            <FiDownload /> {downloadingPdf ? 'Generating PDF...' : 'Download PDF'}
+            <FiDownload /> {downloadingPdf ? 'Generating PDF...' : `Download PDF (${currentRangeLabel})`}
           </button>
 
           {/* Export Menu */}
@@ -571,7 +577,7 @@ export default function DashboardPage() {
               </button>
               {exportOpen && (
                 <div className="export-menu__dropdown">
-                  <button className="export-menu__item" onClick={() => handleExport('pdf')}>📑 Download Daily PDF</button>
+                  <button className="export-menu__item" onClick={() => handleExport('pdf')}>📑 Download PDF ({currentRangeLabel})</button>
                   <button className="export-menu__item" onClick={() => handleExport('csv')}>📄 Export CSV</button>
                   <button className="export-menu__item" onClick={() => handleExport('xlsx')}>📊 Export Excel</button>
                 </div>
