@@ -148,22 +148,43 @@ export function hashRow(tab: string, parsed: RegistrationRow): string {
  */
 export function validateRow(
   values: string[],
-  tab: '200' | '250'
+  tab: '200' | '250',
+  fallbackDate?: string | null
 ): { parsed: RegistrationRow; errors: ValidationError[] } {
   const errors: ValidationError[] = [];
 
-  const name = values[2]?.trim();
-  if (!name) errors.push({ field: 'registrant_name', message: 'Name is required' });
-
-  const dateStr = parseSheetDate(values[1]);
-  if (!dateStr) errors.push({ field: 'registration_date', message: `Cannot parse date: "${values[1]}"` });
-
+  let name = values[2]?.trim();
+  const regNo = values[3]?.trim() || null;
   const sNoRaw = parseInt(values[0]);
+  const sNo = isNaN(sNoRaw) ? null : sNoRaw;
+
+  if (!name) {
+    if (regNo) {
+      name = `Student (${regNo})`;
+      errors.push({ field: 'registrant_name', message: `Name missing in sheet; defaulted to Student (${regNo})` });
+    } else if (sNo !== null) {
+      name = `Registrant #${sNo}`;
+      errors.push({ field: 'registrant_name', message: `Name missing in sheet; defaulted to Registrant #${sNo}` });
+    } else {
+      errors.push({ field: 'registrant_name', message: 'Name is required' });
+    }
+  }
+
+  let dateStr = parseSheetDate(values[1]);
+  if (!dateStr) {
+    if (fallbackDate) {
+      dateStr = fallbackDate;
+      errors.push({ field: 'registration_date', message: `Date empty in sheet; inherited batch date ${fallbackDate}` });
+    } else {
+      errors.push({ field: 'registration_date', message: `Cannot parse date: "${values[1]}"` });
+    }
+  }
+
   const parsed: RegistrationRow = {
-    sNo: isNaN(sNoRaw) ? null : sNoRaw,
+    sNo,
     registrationDate: dateStr,
     registrantName: name || '(unknown)',
-    regNo: values[3]?.trim() || null,
+    regNo,
     year: values[4]?.trim() || null,
     department: values[5]?.trim() || null,
     school: values[6]?.trim() || null,
@@ -300,6 +321,8 @@ export async function performSync(): Promise<SyncResult> {
 
     console.log(`[sync] Tab "${tab}": ${rows.length} data rows fetched`);
 
+    let lastKnownDate: string | null = null;
+
     for (let i = 0; i < rows.length; i++) {
       const rawValues = rows[i];
       const rowNumber = i + 2; // +1 for header, +1 for 1-based
@@ -309,17 +332,28 @@ export async function performSync(): Promise<SyncResult> {
       if (!rawValues || mainCols.every((v) => !v?.trim())) continue;
 
       result.rowsProcessed++;
-      const { parsed, errors: valErrors } = validateRow(rawValues, tab);
 
-      const criticalErrors = valErrors.filter(
-        (e) => e.field === 'registrant_name' || e.field === 'registration_date'
+      const parsedDate = parseSheetDate(rawValues[1]);
+      if (parsedDate) {
+        lastKnownDate = parsedDate;
+      }
+
+      const { parsed, errors: valErrors } = validateRow(rawValues, tab, lastKnownDate);
+
+      const unrecoverableErrors = valErrors.filter(
+        (e) => (e.field === 'registrant_name' && !parsed.registrantName) ||
+               (e.field === 'registration_date' && !parsed.registrationDate)
       );
 
-      if (criticalErrors.length > 0) {
+      if (unrecoverableErrors.length > 0) {
         await flagSyncError(tab, rowNumber, rawValues, valErrors);
         result.rowsFailed++;
-        result.errors.push({ tab, rowNumber, errors: criticalErrors.map((e) => e.message).join('; ') });
+        result.errors.push({ tab, rowNumber, errors: unrecoverableErrors.map((e) => e.message).join('; ') });
         continue;
+      }
+
+      if (valErrors.length > 0) {
+        await flagSyncError(tab, rowNumber, rawValues, valErrors);
       }
 
       const hash = hashRow(tab, parsed);

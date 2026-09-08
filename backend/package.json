@@ -1,6 +1,7 @@
 {
   "name": "pyros-dashboard-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "FAC PYROS Registration Analytics Dashboard — Backend API",
   "main": "dist/index.js",
   "scripts": {

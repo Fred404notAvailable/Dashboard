@@ -55,10 +55,18 @@ describe('sheetsClient validation and parsing', () => {
       expect(parsed.paymentMethod).toBe('UPI');
     });
 
-    it('should flag missing registrant name as an error', () => {
+    it('should map missing registrant name to regNo placeholder if available', () => {
       const values = ['1', '2026-08-18', '', 'REG2026001'];
-      const { errors } = validateRow(values, '250');
+      const { parsed, errors } = validateRow(values, '250');
+      expect(parsed.registrantName).toBe('Student (REG2026001)');
       expect(errors.some(e => e.field === 'registrant_name')).toBe(true);
+    });
+
+    it('should recover empty date when fallbackDate is provided', () => {
+      const values = ['1', '', 'John Doe', 'REG2026001'];
+      const { parsed, errors } = validateRow(values, '200', '2026-09-08');
+      expect(parsed.registrationDate).toBe('2026-09-08');
+      expect(errors.some(e => e.field === 'registration_date')).toBe(true);
     });
 
     it('should flag malformed dates as an error', () => {

@@ -3,7 +3,7 @@ import {
   subDays, subMonths, format, differenceInDays, parseISO
 } from 'date-fns';
 
-export type Preset = 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'ytd';
+export type Preset = 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'ytd' | 'all';
 
 export function resolvePreset(preset: Preset, now = new Date()): { start: string; end: string } {
   const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
@@ -29,6 +29,8 @@ export function resolvePreset(preset: Preset, now = new Date()): { start: string
       return { start: fmt(startOfQuarter(now)), end: fmt(now) };
     case 'ytd':
       return { start: fmt(startOfYear(now)), end: fmt(now) };
+    case 'all':
+      return { start: '2026-08-01', end: fmt(now) };
   }
 }
 

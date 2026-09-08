@@ -1,7 +1,7 @@
 import { createContext, useContext, useReducer, type ReactNode, type Dispatch, useCallback } from 'react';
 import { format } from 'date-fns';
 
-export type Preset = 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'ytd' | 'custom';
+export type Preset = 'all' | 'today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'ytd' | 'custom';
 
 interface FilterState {
   preset: Preset;
@@ -27,8 +27,8 @@ type FilterAction =
   | { type: 'CLEAR_ALL' };
 
 const initialState: FilterState = {
-  preset: 'thisMonth',
-  startDate: format(new Date(new Date().getFullYear(), new Date().getMonth(), 1), 'yyyy-MM-dd'),
+  preset: 'all',
+  startDate: '2026-08-01',
   endDate: format(new Date(), 'yyyy-MM-dd'),
   registrationType: null,
   department: null,

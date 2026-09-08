@@ -51,6 +51,7 @@ function resolvePresetDates(preset: Preset) {
   const now = new Date();
   const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
   switch (preset) {
+    case 'all': return { start: '2026-08-01', end: fmt(now) };
     case 'today': return { start: fmt(now), end: fmt(now) };
     case 'yesterday': { const d = subDays(now, 1); return { start: fmt(d), end: fmt(d) }; }
     case 'last7': return { start: fmt(subDays(now, 6)), end: fmt(now) };
@@ -59,11 +60,12 @@ function resolvePresetDates(preset: Preset) {
     case 'lastMonth': { const lm = subMonths(now, 1); return { start: fmt(startOfMonth(lm)), end: fmt(endOfMonth(lm)) }; }
     case 'thisQuarter': return { start: fmt(startOfQuarter(now)), end: fmt(now) };
     case 'ytd': return { start: fmt(startOfYear(now)), end: fmt(now) };
-    default: return { start: fmt(startOfMonth(now)), end: fmt(now) };
+    default: return { start: '2026-08-01', end: fmt(now) };
   }
 }
 
 const PRESETS: { key: Preset; label: string }[] = [
+  { key: 'all', label: 'All Time' },
   { key: 'today', label: 'Today' },
   { key: 'yesterday', label: 'Yesterday' },
   { key: 'last7', label: 'Last 7 Days' },
