@@ -869,3 +869,119 @@ a:hover {
 @media (max-width: 480px) {
   .app-header__subtitle { display: none; }
 }
+
+/* ===== Nav Tabs ===== */
+.nav-tabs {
+  display: flex;
+  gap: 10px;
+  background: rgba(30, 30, 30, 0.7);
+  padding: 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(212, 168, 67, 0.2);
+  margin-bottom: var(--space-md);
+  width: fit-content;
+}
+
+.nav-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-gray-200);
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.nav-tab:hover {
+  color: var(--color-white);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nav-tab--active {
+  background: linear-gradient(135deg, var(--color-gold), var(--color-gold-dark));
+  color: #000;
+  box-shadow: 0 2px 8px rgba(212, 168, 67, 0.3);
+}
+
+/* ===== Modal Dialog ===== */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: var(--space-md);
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-card {
+  background: #1C1C1C;
+  border: 1px solid rgba(212, 168, 67, 0.3);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(212, 168, 67, 0.15);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 580px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--space-xl);
+  position: relative;
+  animation: slideIn 0.2s ease;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-title {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--color-gold);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--color-gray-300);
+  font-size: 1.4rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.modal-close:hover {
+  color: var(--color-white);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.badge-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+

@@ -5,7 +5,7 @@ import { config } from '../config.js';
 export interface JwtPayload {
   userId: string;
   email: string;
-  role: 'admin' | 'analyst' | 'viewer';
+  role: 'admin' | 'overall' | 'analyst' | 'viewer';
 }
 
 export interface AuthedRequest extends FastifyRequest {
@@ -28,7 +28,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   }
 }
 
-export function requireRole(...allowed: Array<'admin' | 'analyst' | 'viewer'>) {
+export function requireRole(...allowed: Array<'admin' | 'overall' | 'analyst' | 'viewer'>) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const user = (request as AuthedRequest).user;
     if (!user || !allowed.includes(user.role)) {

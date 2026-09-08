@@ -4,7 +4,7 @@ import { authApi } from '../api/client';
 interface User {
   id: string;
   email: string;
-  role: 'admin' | 'analyst' | 'viewer';
+  role: 'admin' | 'overall' | 'analyst' | 'viewer';
   displayName: string;
 }
 

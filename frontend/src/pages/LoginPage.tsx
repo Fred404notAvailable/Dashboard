@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { FiLock, FiMail } from 'react-icons/fi';
+import { FiLock, FiMail, FiShield, FiTrendingUp } from 'react-icons/fi';
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('overall@facpyros.in');
+  const [password, setPassword] = useState('admin123');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -30,12 +30,45 @@ export default function LoginPage() {
     }
   };
 
+  const handleQuickSelect = (roleEmail: string) => {
+    setEmail(roleEmail);
+    setPassword('admin123');
+    setError('');
+  };
+
   return (
     <div className="login-page">
       <div className="login-card animate-slide-in">
         <img src="/pyros-logo.png" alt="FAC PYROS" className="login-card__logo" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
         <h1 className="login-card__title">FAC PYROS</h1>
-        <p className="login-card__subtitle">Registration Analytics Dashboard</p>
+        <p className="login-card__subtitle">Registration & Financial Analytics Dashboard</p>
+
+        {/* Quick Role Selection Tabs */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '20px' }}>
+          <button
+            type="button"
+            className={`btn btn--sm ${email.includes('overall') || email.includes('admin') ? 'btn--primary' : 'btn--ghost'}`}
+            style={{ fontSize: '0.75rem', padding: '8px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}
+            onClick={() => handleQuickSelect('overall@facpyros.in')}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold' }}>
+              <FiShield /> Overall Login
+            </span>
+            <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>Full Revenue & Expenses</span>
+          </button>
+
+          <button
+            type="button"
+            className={`btn btn--sm ${email.includes('analyst') ? 'btn--primary' : 'btn--ghost'}`}
+            style={{ fontSize: '0.75rem', padding: '8px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}
+            onClick={() => handleQuickSelect('analyst@facpyros.in')}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold' }}>
+              <FiTrendingUp /> Analyst Login
+            </span>
+            <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>Registrations Only</span>
+          </button>
+        </div>
 
         {error && (
           <div className="alert-item alert-item--danger" style={{ marginBottom: '24px', justifyContent: 'center' }}>
@@ -52,7 +85,7 @@ export default function LoginPage() {
                 type="email"
                 className="form-group__input"
                 style={{ paddingLeft: '48px' }}
-                placeholder="admin@facpyros.in"
+                placeholder="overall@facpyros.in"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -86,8 +119,8 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p style={{ marginTop: '32px', fontSize: '0.8rem', color: '#505050' }}>
-          Authorized personnel only. All access is logged.
+        <p style={{ marginTop: '24px', fontSize: '0.78rem', color: '#707070', textAlign: 'center' }}>
+          Overall login accesses Gross Revenue & Expenses. General analyst login accesses attendee metrics.
         </p>
       </div>
     </div>

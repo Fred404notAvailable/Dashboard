@@ -103,3 +103,28 @@ export const settingsApi = {
   get: () => api.get('/api/settings'),
   updateGoal: (target: number) => api.put('/api/settings/goal', { target }),
 };
+
+export const expensesApi = {
+  list: (params: Record<string, string>) => api.get('/api/expenses', { params }),
+  summary: (params: Record<string, string>) => api.get('/api/expenses/summary', { params }),
+  create: (data: {
+    title: string;
+    category: string;
+    amount: number;
+    expenseDate?: string;
+    paymentMethod?: string;
+    vendor?: string;
+    notes?: string;
+  }) => api.post('/api/expenses', data),
+  update: (id: string, data: Partial<{
+    title: string;
+    category: string;
+    amount: number;
+    expenseDate: string;
+    paymentMethod: string;
+    vendor: string;
+    notes: string;
+  }>) => api.put(`/api/expenses/${id}`, data),
+  delete: (id: string) => api.delete(`/api/expenses/${id}`),
+};
+

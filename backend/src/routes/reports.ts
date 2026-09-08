@@ -18,8 +18,9 @@ export async function reportRoutes(app: FastifyInstance) {
     } else {
       dateRange = resolvePreset('today');
     }
-
-    const cacheKey = `report:summary:${dateRange.start}:${dateRange.end}`;
+    const user = (request as AuthedRequest).user;
+    const hasFinancialAccess = user?.role === 'admin' || user?.role === 'overall';
+    const cacheKey = `report:summary:${dateRange.start}:${dateRange.end}:${hasFinancialAccess ? 'fin' : 'gen'}`;
     return withCache(cacheKey, async () => {
     // Total counts by registration type
     const totalResult = await query(
@@ -128,7 +129,7 @@ export async function reportRoutes(app: FastifyInstance) {
       [dateRange.start, dateRange.end]
     );
 
-    // Revenue calculations
+    // Revenue calculations (only if authorized)
     const revenue200 = type200 * 200;
     const revenue250 = type250 * 250;
     const totalRevenue = revenue200 + revenue250;
@@ -143,27 +144,27 @@ export async function reportRoutes(app: FastifyInstance) {
     );
 
     const revenueByPayment: Record<string, number> = {};
-    for (const row of revenueByPaymentResult.rows) {
-      const method = row.payment_method || 'Unknown';
-      const rev = parseInt(row.count) * row.registration_type;
-      revenueByPayment[method] = (revenueByPayment[method] || 0) + rev;
+    if (hasFinancialAccess) {
+      for (const row of revenueByPaymentResult.rows) {
+        const method = row.payment_method || 'Unknown';
+        const rev = parseInt(row.count) * row.registration_type;
+        revenueByPayment[method] = (revenueByPayment[method] || 0) + rev;
+      }
     }
 
-    // Data quality alerts
+    // Missing data counts
     const missingMobile = await query(
       `SELECT COUNT(*) as count FROM registrations
-       WHERE registration_date BETWEEN $1 AND $2
-       AND (mobile_no IS NULL OR mobile_no = '')`,
+       WHERE registration_date BETWEEN $1 AND $2 AND (mobile_no IS NULL OR mobile_no = '')`,
       [dateRange.start, dateRange.end]
     );
     const missingPayment = await query(
       `SELECT COUNT(*) as count FROM registrations
-       WHERE registration_date BETWEEN $1 AND $2
-       AND (payment_method IS NULL OR payment_method = '')`,
+       WHERE registration_date BETWEEN $1 AND $2 AND (payment_method IS NULL OR payment_method = '')`,
       [dateRange.start, dateRange.end]
     );
 
-    // Duplicate detection (same name + mobile across tabs)
+    // Cross-tier duplicate registrations
     const duplicateResult = await query(
       `SELECT registrant_name, mobile_no, COUNT(DISTINCT registration_type) as tier_count
        FROM registrations
@@ -236,12 +237,21 @@ export async function reportRoutes(app: FastifyInstance) {
         delta: Math.round(delta * 10) / 10,
         previousTotal: prevTotal,
       },
-      revenue: {
-        total: totalRevenue,
-        type200: revenue200,
-        type250: revenue250,
-        byPaymentMethod: revenueByPayment,
-      },
+      revenue: hasFinancialAccess
+        ? {
+            total: totalRevenue,
+            type200: revenue200,
+            type250: revenue250,
+            byPaymentMethod: revenueByPayment,
+            isRestricted: false,
+          }
+        : {
+            total: null,
+            type200: null,
+            type250: null,
+            byPaymentMethod: {},
+            isRestricted: true,
+          },
       paymentBreakdown: paymentResult.rows.map(r => ({
         method: r.payment_method || 'Unknown',
         count: parseInt(r.count),
@@ -259,7 +269,7 @@ export async function reportRoutes(app: FastifyInstance) {
         type200: data.type200,
         type250: data.type250,
         total: data.type200 + data.type250,
-        revenue: data.type200 * 200 + data.type250 * 250,
+        revenue: hasFinancialAccess ? (data.type200 * 200 + data.type250 * 250) : null,
       })),
       eventPopularity: eventResult.rows.map(r => ({
         event: r.event_name,

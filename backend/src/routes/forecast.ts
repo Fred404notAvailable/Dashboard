@@ -7,7 +7,7 @@ import { withCache } from '../services/cache.js';
 export async function forecastRoutes(app: FastifyInstance) {
   app.get(
     '/api/forecast',
-    { preHandler: [authenticate, requireRole('admin', 'analyst')] },
+    { preHandler: [authenticate, requireRole('admin', 'overall', 'analyst')] },
     async (request) => {
       const { days = '14', target } = request.query as { days?: string; target?: string };
       const horizonDays = Math.max(3, Math.min(60, parseInt(days, 10) || 14));

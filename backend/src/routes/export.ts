@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 
 export async function exportRoutes(app: FastifyInstance) {
   // GET /api/export/csv — streaming CSV export
-  app.get('/api/export/csv', { preHandler: [authenticate, requireRole('admin', 'analyst')] }, async (request, reply) => {
+  app.get('/api/export/csv', { preHandler: [authenticate, requireRole('admin', 'overall', 'analyst')] }, async (request, reply) => {
     const { start, end, preset, type } = request.query as Record<string, string>;
     const user = (request as AuthedRequest).user!;
 
@@ -52,7 +52,7 @@ export async function exportRoutes(app: FastifyInstance) {
   });
 
   // GET /api/export/xlsx — multi-sheet Excel export
-  app.get('/api/export/xlsx', { preHandler: [authenticate, requireRole('admin', 'analyst')] }, async (request, reply) => {
+  app.get('/api/export/xlsx', { preHandler: [authenticate, requireRole('admin', 'overall', 'analyst')] }, async (request, reply) => {
     const { start, end, preset, type } = request.query as Record<string, string>;
     const user = (request as AuthedRequest).user!;
 

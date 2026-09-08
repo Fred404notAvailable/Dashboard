@@ -3,8 +3,8 @@ import { query } from '../database/db.js';
 import { authenticate, requireRole, AuthedRequest } from '../middleware/auth.js';
 
 export async function auditLogRoutes(app: FastifyInstance) {
-  // GET /api/audit-logs — paginated audit trail (Admin only)
-  app.get('/api/audit-logs', { preHandler: [authenticate, requireRole('admin')] }, async (request) => {
+  // GET /api/audit-logs — paginated audit trail (Admin and Overall only)
+  app.get('/api/audit-logs', { preHandler: [authenticate, requireRole('admin', 'overall')] }, async (request) => {
     const { page = '1', pageSize = '50' } = request.query as { page?: string; pageSize?: string };
     const limit = Math.min(parseInt(pageSize) || 50, 100);
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;

@@ -22,7 +22,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   // PUT /api/settings/goal — Update registration target goal
   app.put(
     '/api/settings/goal',
-    { preHandler: [authenticate, requireRole('admin')] },
+    { preHandler: [authenticate, requireRole('admin', 'overall')] },
     async (request, reply) => {
       const { target } = request.body as { target: number | string };
       const user = (request as AuthedRequest).user!;

@@ -11,6 +11,7 @@ import { auditLogRoutes } from './routes/auditLogs.js';
 import { pdfRoutes } from './routes/pdf.js';
 import { forecastRoutes } from './routes/forecast.js';
 import { settingsRoutes } from './routes/settings.js';
+import { expenseRoutes } from './routes/expenses.js';
 import { performSync } from './services/sheetsClient.js';
 
 let appInstance: FastifyInstance | null = null;
@@ -53,6 +54,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Register all routes
   await app.register(authRoutes);
   await app.register(reportRoutes);
+  await app.register(expenseRoutes);
   await app.register(syncRoutes);
   await app.register(exportRoutes);
   await app.register(auditLogRoutes);

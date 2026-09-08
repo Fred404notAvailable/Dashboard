@@ -23,8 +23,21 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'analyst', 'viewer')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'overall', 'analyst', 'viewer')),
   display_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  category TEXT NOT NULL,
+  amount NUMERIC(12, 2) NOT NULL,
+  expense_date DATE NOT NULL,
+  payment_method TEXT NOT NULL,
+  vendor TEXT,
+  notes TEXT,
+  created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

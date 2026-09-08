@@ -78,8 +78,8 @@ export function startSyncScheduler() {
 // ─── Routes ────────────────────────────────────────────────────────────────
 
 export async function syncRoutes(app: FastifyInstance) {
-  // POST /api/sync/trigger — manual sync (Admin only)
-  app.post('/api/sync/trigger', { preHandler: [authenticate, requireRole('admin')] }, async (request, reply) => {
+  // POST /api/sync/trigger — manual sync (Admin and Overall only)
+  app.post('/api/sync/trigger', { preHandler: [authenticate, requireRole('admin', 'overall')] }, async (request, reply) => {
     const user = (request as AuthedRequest).user!;
 
     // Guard: only one sync at a time

@@ -1,27 +1,54 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useFilters, type Preset } from '../context/FilterContext';
 import { useAuth } from '../context/AuthContext';
-import { reportsApi, syncApi, exportApi, pdfApi, settingsApi } from '../api/client';
+import { reportsApi, syncApi, exportApi, pdfApi, expensesApi } from '../api/client';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, Legend
+  PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { format, subDays, startOfMonth, endOfMonth, subMonths, startOfQuarter, startOfYear } from 'date-fns';
-import { FiUsers, FiDollarSign, FiTrendingUp, FiDownload, FiRefreshCw, FiLogOut, FiBarChart2, FiActivity, FiTarget, FiAlertTriangle, FiCheckCircle, FiClock, FiEdit2 } from 'react-icons/fi';
+import {
+  FiUsers, FiDollarSign, FiTrendingUp, FiDownload, FiRefreshCw, FiLogOut,
+  FiBarChart2, FiActivity, FiAlertTriangle,
+  FiEdit2, FiLock, FiPlus, FiTrash2, FiSearch, FiCreditCard, FiTag
+} from 'react-icons/fi';
 
 const GOLD = '#D4A843';
 const RED = '#8B1A1A';
 const RED_LIGHT = '#A82828';
-const CHART_COLORS = [GOLD, RED, '#2ECC71', '#3498DB', '#9B59B6', '#E67E22', '#1ABC9C', '#E74C3C'];
+const GREEN = '#2ECC71';
+const CHART_COLORS = [GOLD, RED_LIGHT, GREEN, '#3498DB', '#9B59B6', '#E67E22', '#1ABC9C', '#E74C3C'];
+
+const CATEGORY_COLORS: Record<string, string> = {
+  'Venue & Stage': '#E67E22',
+  'Audio / Visual & Lighting': '#9B59B6',
+  'Prizes & Shields': '#D4A843',
+  'Food & Hospitality': '#2ECC71',
+  'Printing & Badges': '#3498DB',
+  'Operations & Logistics': '#E74C3C',
+  'Marketing & Promotion': '#1ABC9C',
+  'Miscellaneous': '#95A5A6',
+};
+
+const EXPENSE_CATEGORIES = [
+  'Venue & Stage',
+  'Audio / Visual & Lighting',
+  'Prizes & Shields',
+  'Food & Hospitality',
+  'Printing & Badges',
+  'Operations & Logistics',
+  'Marketing & Promotion',
+  'Miscellaneous',
+];
 
 interface SummaryData {
   dateRange: { start: string; end: string };
   summary: { total: number; type200: number; type250: number; delta: number; previousTotal: number };
-  revenue: { total: number; type200: number; type250: number; byPaymentMethod: Record<string, number> };
+  revenue: { total: number | null; type200: number | null; type250: number | null; byPaymentMethod: Record<string, number>; isRestricted?: boolean };
   paymentBreakdown: { method: string; count: number }[];
   departmentBreakdown: { department: string; count: number }[];
   yearBreakdown: { year: string; count: number }[];
-  schoolComparison: { school: string; type200: number; type250: number; total: number; revenue: number }[];
+  schoolComparison: { school: string; type200: number; type250: number; total: number; revenue: number | null }[];
   eventPopularity: { event: string; count: number; percentage: number }[];
   eventCombinations: { combination: string; count: number }[];
   dailyVolume: { date: string; type200: number; type250: number; total: number }[];
@@ -45,6 +72,33 @@ interface ForecastData {
     confidenceScore: number;
   };
   horizonDays: number;
+}
+
+interface ExpenseItem {
+  id: string;
+  title: string;
+  category: string;
+  amount: number;
+  expenseDate: string;
+  paymentMethod: string;
+  vendor: string | null;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+interface FinancialSummary {
+  dateRange: { start: string; end: string };
+  financials: {
+    grossRevenue: number;
+    totalExpenses: number;
+    netBalance: number;
+    profitMargin: number;
+    expenseRatio: number;
+    totalRegistrations: number;
+    tierRevenue: { type200: number; type250: number };
+  };
+  categoryBreakdown: { category: string; amount: number; count: number; percentage: number }[];
 }
 
 function resolvePresetDates(preset: Preset) {
@@ -79,14 +133,38 @@ const PRESETS: { key: Preset; label: string }[] = [
 export default function DashboardPage() {
   const { filters, dispatch, queryParams } = useFilters();
   const { user, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState<'analytics' | 'expenses'>('analytics');
+
+  const hasFinancialAccess = user?.role === 'admin' || user?.role === 'overall';
+
+  // Analytics states
   const [data, setData] = useState<SummaryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<{ status: string; completedAt: string | null } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
-  const [recentRegs, setRecentRegs] = useState<any[]>([]);
   const [forecastHorizon, setForecastHorizon] = useState<number>(14);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
+
+  // Expense states
+  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  const [financials, setFinancials] = useState<FinancialSummary | null>(null);
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('');
+  const [expensePaymentFilter, setExpensePaymentFilter] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
+  const [expenseForm, setExpenseForm] = useState({
+    title: '',
+    category: 'Venue & Stage',
+    amount: '',
+    expenseDate: format(new Date(), 'yyyy-MM-dd'),
+    paymentMethod: 'GPAY',
+    vendor: '',
+    notes: '',
+  });
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
 
   const fetchForecast = useCallback(async (days: number) => {
     setForecastLoading(true);
@@ -100,17 +178,29 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchExpenses = useCallback(async () => {
+    if (!hasFinancialAccess) return;
+    try {
+      const [listRes, sumRes] = await Promise.all([
+        expensesApi.list(queryParams),
+        expensesApi.summary(queryParams),
+      ]);
+      setExpenses(listRes.data.data || []);
+      setFinancials(sumRes.data);
+    } catch (err) {
+      console.error('Failed to fetch expenses:', err);
+    }
+  }, [queryParams, hasFinancialAccess]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [summaryRes, syncRes, recentRes] = await Promise.all([
+      const [summaryRes, syncRes] = await Promise.all([
         reportsApi.summary(queryParams),
         syncApi.status(),
-        reportsApi.recent(10),
       ]);
       setData(summaryRes.data);
       setSyncStatus(syncRes.data.lastSync);
-      setRecentRegs(recentRes.data);
     } catch (err) {
       console.error('Failed to fetch data:', err);
     } finally {
@@ -118,10 +208,15 @@ export default function DashboardPage() {
     }
   }, [queryParams]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+    if (hasFinancialAccess) {
+      fetchExpenses();
+    }
+  }, [fetchData, fetchExpenses, hasFinancialAccess]);
 
   useEffect(() => {
-    if (user?.role === 'admin' || user?.role === 'analyst') {
+    if (user?.role === 'admin' || user?.role === 'overall' || user?.role === 'analyst') {
       fetchForecast(forecastHorizon);
     }
   }, [forecastHorizon, fetchForecast, user]);
@@ -144,28 +239,6 @@ export default function DashboardPage() {
   };
 
   const [downloadingPdf, setDownloadingPdf] = useState(false);
-  const [editingGoal, setEditingGoal] = useState(false);
-  const [newGoalInput, setNewGoalInput] = useState('');
-  const [savingGoal, setSavingGoal] = useState(false);
-
-  const handleSaveGoal = async () => {
-    const num = parseInt(newGoalInput, 10);
-    if (isNaN(num) || num <= 0) return;
-    setSavingGoal(true);
-    try {
-      await settingsApi.updateGoal(num);
-      setEditingGoal(false);
-      await Promise.all([
-        fetchData(),
-        fetchForecast(forecastHorizon)
-      ]);
-    } catch (err) {
-      console.error('Failed to update goal:', err);
-      alert('Failed to update registration goal. Please try again.');
-    } finally {
-      setSavingGoal(false);
-    }
-  };
 
   const handleDownloadPdf = async () => {
     setDownloadingPdf(true);
@@ -232,10 +305,114 @@ export default function DashboardPage() {
     try {
       await syncApi.trigger();
       fetchData();
+      if (hasFinancialAccess) fetchExpenses();
     } catch (err) {
       console.error('Sync failed:', err);
     }
   };
+
+  // Expense modal handlers
+  const handleOpenAddExpense = () => {
+    setEditingExpense(null);
+    setExpenseForm({
+      title: '',
+      category: 'Venue & Stage',
+      amount: '',
+      expenseDate: format(new Date(), 'yyyy-MM-dd'),
+      paymentMethod: 'GPAY',
+      vendor: '',
+      notes: '',
+    });
+    setFormError('');
+    setModalOpen(true);
+  };
+
+  const handleOpenEditExpense = (expense: ExpenseItem) => {
+    setEditingExpense(expense);
+    setExpenseForm({
+      title: expense.title,
+      category: expense.category,
+      amount: String(expense.amount),
+      expenseDate: expense.expenseDate ? expense.expenseDate.split('T')[0] : format(new Date(), 'yyyy-MM-dd'),
+      paymentMethod: expense.paymentMethod || 'GPAY',
+      vendor: expense.vendor || '',
+      notes: expense.notes || '',
+    });
+    setFormError('');
+    setModalOpen(true);
+  };
+
+  const handleDeleteExpense = async (id: string, title: string) => {
+    if (!window.confirm(`Are you sure you want to delete expense "${title}"?`)) return;
+    try {
+      await expensesApi.delete(id);
+      fetchExpenses();
+    } catch (err) {
+      console.error('Failed to delete expense:', err);
+      alert('Failed to delete expense.');
+    }
+  };
+
+  const handleSaveExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+
+    if (!expenseForm.title.trim()) {
+      setFormError('Please enter an expense title.');
+      return;
+    }
+    const amt = parseFloat(expenseForm.amount);
+    if (isNaN(amt) || amt <= 0) {
+      setFormError('Please enter a valid positive amount in ₹.');
+      return;
+    }
+
+    setFormSubmitting(true);
+    try {
+      if (editingExpense) {
+        await expensesApi.update(editingExpense.id, {
+          title: expenseForm.title.trim(),
+          category: expenseForm.category,
+          amount: amt,
+          expenseDate: expenseForm.expenseDate,
+          paymentMethod: expenseForm.paymentMethod,
+          vendor: expenseForm.vendor.trim(),
+          notes: expenseForm.notes.trim(),
+        });
+      } else {
+        await expensesApi.create({
+          title: expenseForm.title.trim(),
+          category: expenseForm.category,
+          amount: amt,
+          expenseDate: expenseForm.expenseDate,
+          paymentMethod: expenseForm.paymentMethod,
+          vendor: expenseForm.vendor.trim(),
+          notes: expenseForm.notes.trim(),
+        });
+      }
+      setModalOpen(false);
+      fetchExpenses();
+    } catch (err: any) {
+      setFormError(err.response?.data?.error || 'Failed to save expense.');
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  // Filtered expenses list
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter(item => {
+      if (expenseCategoryFilter && item.category !== expenseCategoryFilter) return false;
+      if (expensePaymentFilter && item.paymentMethod !== expensePaymentFilter) return false;
+      if (expenseSearch) {
+        const s = expenseSearch.toLowerCase();
+        return item.title.toLowerCase().includes(s) ||
+               (item.vendor && item.vendor.toLowerCase().includes(s)) ||
+               (item.notes && item.notes.toLowerCase().includes(s));
+      }
+      return true;
+    });
+  }, [expenses, expenseCategoryFilter, expensePaymentFilter, expenseSearch]);
 
   const maxDeptCount = data ? Math.max(...data.departmentBreakdown.map(d => d.count), 1) : 1;
   const maxEventCount = data ? Math.max(...data.eventPopularity.map(e => e.count), 1) : 1;
@@ -256,25 +433,21 @@ export default function DashboardPage() {
       {/* Header */}
       <header className="app-header">
         <div className="app-header__brand">
-          <img src="/pyros-logo.png" alt="FAC PYROS" className="app-header__logo" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          <img src="/pyros-logo.png" alt="FAC PYROS" className="app-header__logo" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           <div>
-            <div className="app-header__title">FAC PYROS</div>
-            <div className="app-header__subtitle">Registration Analytics Dashboard</div>
+            <h1 className="app-header__title">FAC PYROS</h1>
+            <p className="app-header__subtitle">Registration & Financial Analytics</p>
           </div>
         </div>
-        <div className="app-header__actions">
-          {/* Sync Status */}
-          <div className={`sync-status sync-status--${syncStatus?.status === 'success' ? 'ok' : syncStatus?.status === 'failed' ? 'error' : 'running'}`}>
-            {syncStatus?.status === 'success' ? '✅' : syncStatus?.status === 'failed' ? '⚠️' : '🔄'}
-            {syncStatus?.completedAt
-              ? ` Synced ${formatTimeAgo(syncStatus.completedAt)}`
-              : ' No sync yet'}
-          </div>
 
-          {user?.role === 'admin' && (
-            <button className="btn btn--secondary btn--sm" onClick={handleSync} title="Manual Sync">
-              <FiRefreshCw /> Sync
-            </button>
+        <div className="app-header__actions">
+          {/* Sync Status Badge */}
+          {syncStatus && (
+            <div className="sync-badge" onClick={handleSync} style={{ cursor: 'pointer' }} title="Click to trigger live sync">
+              <span className={`sync-badge__dot ${syncStatus.status === 'success' ? 'sync-badge__dot--success' : syncStatus.status === 'running' ? 'sync-badge__dot--syncing' : 'sync-badge__dot--error'}`} />
+              <FiRefreshCw className={syncStatus.status === 'running' ? 'animate-spin' : ''} style={{ fontSize: '0.8rem' }} />
+              <span>{syncStatus.status === 'running' ? 'Syncing...' : 'Live Sheets'}</span>
+            </div>
           )}
 
           {/* Quick PDF Report Download */}
@@ -289,7 +462,7 @@ export default function DashboardPage() {
           </button>
 
           {/* Export Menu */}
-          {(user?.role === 'admin' || user?.role === 'analyst') && (
+          {(user?.role === 'admin' || user?.role === 'overall' || user?.role === 'analyst') && (
             <div className="export-menu">
               <button className="btn btn--primary btn--sm" onClick={() => setExportOpen(!exportOpen)}>
                 <FiDownload /> Export
@@ -304,13 +477,47 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <span style={{ fontSize: '0.8rem', color: '#808080' }}>{user?.displayName} ({user?.role})</span>
-          <button className="btn btn--ghost btn--sm" onClick={logout}><FiLogOut /></button>
+          <span style={{ fontSize: '0.8rem', color: '#B0B0B0', background: 'rgba(255,255,255,0.06)', padding: '4px 10px', borderRadius: '6px' }}>
+            {user?.displayName} <strong style={{ color: user?.role === 'overall' ? GOLD : '#E0E0E0' }}>({user?.role?.toUpperCase()})</strong>
+          </span>
+          <button className="btn btn--ghost btn--sm" onClick={logout} title="Sign Out"><FiLogOut /></button>
         </div>
       </header>
 
       <main className="app-main">
-        {/* Filter Bar */}
+        {/* Navigation Tabs */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div className="nav-tabs animate-fade-in">
+            <button
+              className={`nav-tab ${activeTab === 'analytics' ? 'nav-tab--active' : ''}`}
+              onClick={() => setActiveTab('analytics')}
+            >
+              <FiBarChart2 /> Registration Analytics
+            </button>
+
+            {hasFinancialAccess && (
+              <button
+                className={`nav-tab ${activeTab === 'expenses' ? 'nav-tab--active' : ''}`}
+                onClick={() => setActiveTab('expenses')}
+              >
+                <FiDollarSign /> Financials & Expenses
+              </button>
+            )}
+          </div>
+
+          {/* Right Action for Expenses */}
+          {activeTab === 'expenses' && hasFinancialAccess && (
+            <button
+              className="btn btn--primary btn--md animate-fade-in"
+              onClick={handleOpenAddExpense}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}
+            >
+              <FiPlus /> Add New Expense
+            </button>
+          )}
+        </div>
+
+        {/* Filter Bar (Shared Across Tabs) */}
         <div className="filter-bar animate-fade-in">
           <div className="filter-bar__presets">
             {PRESETS.map(p => (
@@ -342,33 +549,34 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Active Filters */}
-        {(filters.registrationType || filters.department || filters.event) && (
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            {filters.registrationType && (
-              <span className="filter-chip">
-                ₹{filters.registrationType} Tier
-                <span className="filter-chip__close" onClick={() => handleDrillType(null)}>×</span>
-              </span>
-            )}
-            {filters.department && (
-              <span className="filter-chip">
-                {filters.department}
-                <span className="filter-chip__close" onClick={() => handleDrillDept(null)}>×</span>
-              </span>
-            )}
-            {filters.event && (
-              <span className="filter-chip">
-                {filters.event}
-                <span className="filter-chip__close" onClick={() => handleDrillEvent(null)}>×</span>
-              </span>
-            )}
-            <button className="btn btn--ghost btn--sm" onClick={() => dispatch({ type: 'CLEAR_ALL' })}>Clear all</button>
-          </div>
-        )}
-
-        {data && (
+        {/* ════════════════════════ TAB 1: REGISTRATION ANALYTICS ════════════════════════ */}
+        {activeTab === 'analytics' && data && (
           <>
+            {/* Active Filters */}
+            {(filters.registrationType || filters.department || filters.event) && (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                {filters.registrationType && (
+                  <span className="filter-chip">
+                    ₹{filters.registrationType} Tier
+                    <span className="filter-chip__close" onClick={() => handleDrillType(null)}>×</span>
+                  </span>
+                )}
+                {filters.department && (
+                  <span className="filter-chip">
+                    {filters.department}
+                    <span className="filter-chip__close" onClick={() => handleDrillDept(null)}>×</span>
+                  </span>
+                )}
+                {filters.event && (
+                  <span className="filter-chip">
+                    {filters.event}
+                    <span className="filter-chip__close" onClick={() => handleDrillEvent(null)}>×</span>
+                  </span>
+                )}
+                <button className="btn btn--ghost btn--sm" onClick={() => dispatch({ type: 'CLEAR_ALL' })}>Clear all</button>
+              </div>
+            )}
+
             {/* KPI Cards */}
             <div className="kpi-grid animate-fade-in">
               <div className="kpi-card" onClick={() => handleDrillType(null)} style={{ cursor: 'pointer' }}>
@@ -381,25 +589,35 @@ export default function DashboardPage() {
               </div>
 
               <div className="kpi-card" onClick={() => handleDrillType(200)} style={{ cursor: 'pointer' }}>
-                <div className="kpi-card__label">₹200 Tier</div>
+                <div className="kpi-card__label">₹200 Standard Tier</div>
                 <div className="kpi-card__value">{data.summary.type200.toLocaleString()}</div>
                 <div style={{ fontSize: '0.75rem', color: '#B0B0B0', marginTop: '4px' }}>
-                  Revenue: ₹{data.revenue.type200.toLocaleString()}
+                  {hasFinancialAccess ? `Revenue: ₹${(data.revenue?.type200 || 0).toLocaleString()}` : 'Registrations Ingested'}
                 </div>
               </div>
 
               <div className="kpi-card" onClick={() => handleDrillType(250)} style={{ cursor: 'pointer' }}>
-                <div className="kpi-card__label">₹250 Tier</div>
+                <div className="kpi-card__label">₹250 Premium Tier</div>
                 <div className="kpi-card__value">{data.summary.type250.toLocaleString()}</div>
                 <div style={{ fontSize: '0.75rem', color: '#B0B0B0', marginTop: '4px' }}>
-                  Revenue: ₹{data.revenue.type250.toLocaleString()}
+                  {hasFinancialAccess ? `Revenue: ₹${(data.revenue?.type250 || 0).toLocaleString()}` : 'Registrations Ingested'}
                 </div>
               </div>
 
               <div className="kpi-card">
                 <FiDollarSign className="kpi-card__icon" />
-                <div className="kpi-card__label">Total Revenue</div>
-                <div className="kpi-card__value kpi-card__value--gold">₹{data.revenue.total.toLocaleString()}</div>
+                <div className="kpi-card__label">Total Gross Revenue</div>
+                {hasFinancialAccess && data.revenue?.total !== null ? (
+                  <div className="kpi-card__value kpi-card__value--gold">
+                    ₹{data.revenue.total.toLocaleString()}
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '8px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', color: '#D4A843', background: 'rgba(212,168,67,0.12)', padding: '4px 10px', borderRadius: '6px' }}>
+                      <FiLock /> Overall Login Only
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -433,7 +651,7 @@ export default function DashboardPage() {
 
               {/* Registration Type Donut */}
               <div className="chart-card animate-fade-in">
-                <div className="chart-card__title">🍩 Registration Type Distribution</div>
+                <div className="chart-card__title">🍩 Registration Tier Breakdown</div>
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
                     <Pie
@@ -450,328 +668,81 @@ export default function DashboardPage() {
                           handleDrillType(entry.name.includes('200') ? 200 : 250);
                         }
                       }}
-                      style={{ cursor: 'pointer' }}
                     >
                       <Cell fill={GOLD} />
                       <Cell fill={RED} />
                     </Pie>
-                    <Tooltip contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px', color: '#F5F5F5' }} />
+                    <Tooltip contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px' }} />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
-
-              {/* Payment Breakdown */}
-              <div className="chart-card animate-fade-in">
-                <div className="chart-card__title">💳 Payment Method Breakdown</div>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={data.paymentBreakdown}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                    <XAxis dataKey="method" tick={{ fill: '#808080', fontSize: 11 }} />
-                    <YAxis tick={{ fill: '#808080', fontSize: 11 }} />
-                    <Tooltip contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px', color: '#F5F5F5' }} />
-                    <Bar dataKey="count" name="Registrations" radius={[4, 4, 0, 0]}>
-                      {data.paymentBreakdown.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Cumulative Growth */}
-              <div className="chart-card animate-fade-in">
-                <div className="chart-card__title">📊 Cumulative Growth</div>
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={data.cumulativeGrowth}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                    <XAxis dataKey="date" tick={{ fill: '#808080', fontSize: 11 }} tickFormatter={(d) => format(new Date(d), 'dd MMM')} />
-                    <YAxis tick={{ fill: '#808080', fontSize: 11 }} />
-                    <Tooltip contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px', color: '#F5F5F5' }} />
-                    <Line type="monotone" dataKey="cumulative" name="Cumulative Total" stroke={GOLD} strokeWidth={3} dot={{ fill: GOLD, r: 4 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
             </div>
 
-            {/* Department Leaderboard + Event Popularity */}
-            <div className="charts-grid" style={{ marginBottom: '24px' }}>
-              <div className="card animate-fade-in">
-                <div className="section-title"><FiBarChart2 /> Department Leaderboard</div>
-                <ul className="leaderboard">
-                  {data.departmentBreakdown.slice(0, 8).map((dept, i) => (
-                    <li key={dept.department} className="leaderboard__item" onClick={() => handleDrillDept(dept.department)} style={{ cursor: 'pointer' }}>
-                      <span className="leaderboard__rank">{i + 1}</span>
-                      <span className="leaderboard__name">{dept.department}</span>
-                      <div className="leaderboard__bar-container">
-                        <div className="leaderboard__bar" style={{ width: `${(dept.count / maxDeptCount) * 100}%` }}>
-                          {dept.count}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="card animate-fade-in">
-                <div className="section-title"><FiTrendingUp /> Event Popularity</div>
-                <ul className="leaderboard">
-                  {data.eventPopularity.slice(0, 8).map((evt, i) => (
-                    <li key={evt.event} className="leaderboard__item" onClick={() => handleDrillEvent(evt.event)} style={{ cursor: 'pointer' }}>
-                      <span className="leaderboard__rank">{i + 1}</span>
-                      <span className="leaderboard__name">{evt.event}</span>
-                      <div className="leaderboard__bar-container">
-                        <div className="leaderboard__bar" style={{ width: `${(evt.count / maxEventCount) * 100}%` }}>
-                          {evt.count} ({evt.percentage}%)
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <p style={{ fontSize: '0.7rem', color: '#808080', marginTop: '8px' }}>
-                  Percentages may exceed 100% — students register for multiple events
-                </p>
-              </div>
-            </div>
-
-            {/* Year-wise + School Comparison + Event Combos */}
-            <div className="charts-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '24px' }}>
-              {/* Year-wise */}
-              <div className="card animate-fade-in">
-                <div className="section-title">🎓 Year-wise Breakdown</div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={data.yearBreakdown} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                    <XAxis type="number" tick={{ fill: '#808080', fontSize: 11 }} />
-                    <YAxis type="category" dataKey="year" tick={{ fill: '#B0B0B0', fontSize: 12 }} width={60} />
-                    <Tooltip contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px', color: '#F5F5F5' }} />
-                    <Bar dataKey="count" name="Registrations" fill={GOLD} radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* School Comparison Table */}
-              <div className="card animate-fade-in">
-                <div className="section-title">🏫 School Comparison</div>
-                <div className="data-table-wrapper" style={{ maxHeight: '240px', overflow: 'auto' }}>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>School</th>
-                        <th>₹200</th>
-                        <th>₹250</th>
-                        <th>Total</th>
-                        <th>Revenue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.schoolComparison.map(s => (
-                        <tr key={s.school}>
-                          <td>{s.school}</td>
-                          <td>{s.type200}</td>
-                          <td>{s.type250}</td>
-                          <td style={{ fontWeight: 700 }}>{s.total}</td>
-                          <td style={{ color: GOLD }}>₹{s.revenue.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Event Combinations */}
-              <div className="card animate-fade-in">
-                <div className="section-title">🔗 Top Event Combos</div>
-                <div className="data-table-wrapper" style={{ maxHeight: '240px', overflow: 'auto' }}>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Combination</th>
-                        <th>Count</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.eventCombinations.slice(0, 8).map((c, i) => (
-                        <tr key={c.combination}>
-                          <td>{i + 1}</td>
-                          <td>{c.combination}</td>
-                          <td style={{ fontWeight: 700 }}>{c.count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            {/* Goal Tracker + Data Quality + Revenue by Payment */}
-            <div className="charts-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '24px' }}>
-              {/* Goal Tracker */}
-              <div className="card animate-fade-in">
-                <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><FiTarget /> Registration Goal</span>
-                  {user?.role === 'admin' && !editingGoal && (
-                    <button
-                      className="btn btn--ghost btn--sm"
-                      onClick={() => { setEditingGoal(true); setNewGoalInput(String(data.goal.target)); }}
-                      title="Edit Target Goal"
-                      style={{ fontSize: '0.75rem', padding: '2px 8px', color: GOLD }}
-                    >
-                      <FiEdit2 style={{ marginRight: '4px' }} /> Edit Goal
-                    </button>
-                  )}
-                </div>
-
-                {editingGoal ? (
-                  <div style={{ margin: '12px 0' }}>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={newGoalInput}
-                        onChange={(e) => setNewGoalInput(e.target.value)}
-                        className="form-group__input"
-                        placeholder="e.g. 1000"
-                        style={{ width: '130px', padding: '6px 10px', fontSize: '0.9rem' }}
-                        autoFocus
+            {/* Department Breakdown Bar Chart */}
+            <div className="chart-card animate-fade-in" style={{ marginTop: '24px' }}>
+              <div className="chart-card__title">🏛️ Department Registrations Breakdown</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
+                {data.departmentBreakdown.map((dept, i) => (
+                  <div key={dept.department} style={{ cursor: 'pointer' }} onClick={() => handleDrillDept(dept.department)}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                      <span><strong>{dept.department}</strong></span>
+                      <span style={{ color: GOLD }}>{dept.count} registrations</span>
+                    </div>
+                    <div style={{ background: '#2C2C2C', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          background: `linear-gradient(90deg, ${CHART_COLORS[i % CHART_COLORS.length]}, ${GOLD})`,
+                          width: `${(dept.count / maxDeptCount) * 100}%`,
+                          height: '100%',
+                          borderRadius: '4px',
+                        }}
                       />
-                      <button className="btn btn--primary btn--sm" onClick={handleSaveGoal} disabled={savingGoal}>
-                        {savingGoal ? 'Saving...' : 'Save'}
-                      </button>
-                      <button className="btn btn--secondary btn--sm" onClick={() => setEditingGoal(false)} disabled={savingGoal}>
-                        Cancel
-                      </button>
                     </div>
-                    <span style={{ fontSize: '0.75rem', color: '#808080' }}>Updates progress bars and predictive forecast targets</span>
                   </div>
-                ) : (
-                  <>
-                    <div className="progress-bar">
-                      <div className="progress-bar__fill" style={{ width: `${Math.min(data.goal.percentage, 100)}%` }}>
-                        {data.goal.current}/{data.goal.target} ({data.goal.percentage}%)
-                      </div>
-                    </div>
-                    <p style={{ fontSize: '0.8rem', color: '#B0B0B0', marginTop: '8px', textAlign: 'center' }}>
-                      {data.goal.remaining > 0
-                        ? `${data.goal.remaining} more registrations needed`
-                        : '🎉 Goal reached!'}
-                    </p>
-                  </>
-                )}
-              </div>
-
-              {/* Data Quality Alerts */}
-              <div className="card animate-fade-in">
-                <div className="section-title"><FiAlertTriangle /> Data Quality</div>
-                <div className="alert-list">
-                  {data.dataQuality.missingMobile > 0 && (
-                    <div className="alert-item alert-item--warning">⚠️ {data.dataQuality.missingMobile} rows missing Mobile No</div>
-                  )}
-                  {data.dataQuality.missingPayment > 0 && (
-                    <div className="alert-item alert-item--warning">⚠️ {data.dataQuality.missingPayment} rows missing Payment Method</div>
-                  )}
-                  {data.dataQuality.duplicates.length > 0 ? (
-                    <div className="alert-item alert-item--danger">🔴 {data.dataQuality.duplicates.length} potential duplicate(s) found</div>
-                  ) : (
-                    <div className="alert-item alert-item--success"><FiCheckCircle /> No duplicates detected</div>
-                  )}
-                  {data.dataQuality.missingMobile === 0 && data.dataQuality.missingPayment === 0 && (
-                    <div className="alert-item alert-item--success"><FiCheckCircle /> All data fields complete</div>
-                  )}
-                </div>
-              </div>
-
-              {/* Registration Velocity */}
-              <div className="card animate-fade-in">
-                <div className="section-title"><FiActivity /> Registration Velocity</div>
-                {data.velocity.length > 0 && (
-                  <>
-                    <div style={{ fontSize: '1.8rem', fontWeight: 800, color: GOLD, marginBottom: '4px' }}>
-                      {data.velocity[0]?.count || 0}
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: '#B0B0B0', marginBottom: '12px' }}>
-                      registrations on most recent day
-                    </div>
-                    <ResponsiveContainer width="100%" height={80}>
-                      <AreaChart data={[...data.velocity].reverse()}>
-                        <Area type="monotone" dataKey="count" stroke={GOLD} fill="url(#gradGold)" strokeWidth={2} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </>
-                )}
+                ))}
               </div>
             </div>
 
-            {/* Revenue by Payment + Recent Feed */}
-            <div className="charts-grid" style={{ marginBottom: '24px' }}>
-              {/* Revenue by Payment Method */}
-              <div className="card animate-fade-in">
-                <div className="section-title"><FiDollarSign /> Revenue by Payment Method</div>
-                <div className="data-table-wrapper">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Payment Method</th>
-                        <th>Count</th>
-                        <th>Revenue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.paymentBreakdown.map(p => (
-                        <tr key={p.method}>
-                          <td>{p.method}</td>
-                          <td>{p.count}</td>
-                          <td style={{ color: GOLD, fontWeight: 700 }}>
-                            ₹{(data.revenue.byPaymentMethod[p.method] || 0).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Recent Registrations Feed */}
-              <div className="card animate-fade-in">
-                <div className="section-title"><FiClock /> Recent Registrations</div>
-                <div className="feed-list">
-                  {recentRegs.map((reg, i) => (
-                    <div key={i} className="feed-item" style={{ animationDelay: `${i * 0.05}s` }}>
-                      <span className="feed-item__name">{reg.name}</span>
-                      <span className="feed-item__dept">{reg.department}</span>
-                      <div className="feed-item__events">
-                        {reg.events.map((e: string) => <span key={e} className="event-tag">{e}</span>)}
-                      </div>
-                      <span className="feed-item__type">₹{reg.type}</span>
+            {/* Event Popularity Leaderboard */}
+            <div className="chart-card animate-fade-in" style={{ marginTop: '24px' }}>
+              <div className="chart-card__title">🏆 Top Event Selections</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
+                {data.eventPopularity.slice(0, 8).map((ev, i) => (
+                  <div key={ev.event} style={{ cursor: 'pointer' }} onClick={() => handleDrillEvent(ev.event)}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                      <span><strong>#{i + 1} {ev.event}</strong></span>
+                      <span style={{ color: '#2ECC71' }}>{ev.count} choices ({ev.percentage}%)</span>
                     </div>
-                  ))}
-                  {recentRegs.length === 0 && (
-                    <p style={{ color: '#808080', fontSize: '0.85rem' }}>No recent registrations</p>
-                  )}
-                </div>
+                    <div style={{ background: '#2C2C2C', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          background: `linear-gradient(90deg, ${GOLD}, #2ECC71)`,
+                          width: `${(ev.count / maxEventCount) * 100}%`,
+                          height: '100%',
+                          borderRadius: '4px',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Predictive Analytics & Forecast (Phase 6) */}
-            {(user?.role === 'admin' || user?.role === 'analyst') && (
-              <div className="card animate-fade-in" style={{ marginBottom: '24px', border: `1px solid ${GOLD}40` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-                  <div>
-                    <div className="section-title" style={{ margin: 0, fontSize: '1.1rem', color: GOLD }}>
-                      🔮 Predictive Registration Forecast (Phase 6)
-                    </div>
-                    <p style={{ fontSize: '0.8rem', color: '#888', margin: '4px 0 0 0' }}>
-                      Statistical trend model with blended moving-average and 95% confidence intervals
-                    </p>
+            {/* Registration Predictive Forecast */}
+            {forecastData && (
+              <div className="chart-card animate-fade-in" style={{ marginTop: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div className="chart-card__title" style={{ marginBottom: 0 }}>
+                    🔮 Predictive Growth Forecast
                   </div>
-
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>Horizon:</span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
                     {[7, 14, 30].map(h => (
                       <button
                         key={h}
-                        className={`preset-btn ${forecastHorizon === h ? 'preset-btn--active' : ''}`}
+                        className={`btn btn--sm ${forecastHorizon === h ? 'btn--primary' : 'btn--ghost'}`}
                         onClick={() => setForecastHorizon(h)}
-                        style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+                        disabled={forecastLoading}
                       >
                         {h} Days
                       </button>
@@ -779,127 +750,417 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {forecastLoading && (
-                  <div style={{ padding: '32px', textAlign: 'center', color: '#888' }}>Calculating forecast models...</div>
-                )}
-
-                {!forecastLoading && forecastData && (
-                  <>
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                      gap: '12px',
-                      marginBottom: '20px'
-                    }}>
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Projected Final Volume</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.4rem', color: GOLD }}>
-                          {forecastData.metrics.projectedTotal}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          +{forecastData.metrics.projectedTotal - forecastData.metrics.currentTotal} expected
-                        </div>
-                      </div>
-
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Avg Daily Velocity</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.4rem', color: '#2ECC71' }}>
-                          {forecastData.metrics.averageDailyRate} <span style={{ fontSize: '0.8rem' }}>/ day</span>
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          Trend slope: {forecastData.metrics.trendSlope >= 0 ? '+' : ''}{forecastData.metrics.trendSlope}
-                        </div>
-                      </div>
-
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Goal Completion Date</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.2rem', color: '#3498DB' }}>
-                          {forecastData.metrics.projectedGoalDate || 'N/A'}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          Target: {forecastData.metrics.goalTarget} registrations
-                        </div>
-                      </div>
-
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Model Confidence</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.4rem', color: '#E67E22' }}>
-                          {forecastData.metrics.confidenceScore}%
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          R² goodness-of-fit: {forecastData.metrics.rSquared}
-                        </div>
-                      </div>
-                    </div>
-
-                    <ResponsiveContainer width="100%" height={260}>
-                      <AreaChart
-                        data={[
-                          ...forecastData.historical.map(h => ({
-                            date: h.date,
-                            actual: h.count,
-                            predicted: null,
-                            lower: null,
-                            upper: null,
-                          })),
-                          ...forecastData.forecast.map(f => ({
-                            date: f.date,
-                            actual: null,
-                            predicted: f.predicted,
-                            lower: f.lower,
-                            upper: f.upper,
-                          })),
-                        ]}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                        <XAxis dataKey="date" tick={{ fill: '#808080', fontSize: 10 }} />
-                        <YAxis tick={{ fill: '#808080', fontSize: 11 }} />
-                        <Tooltip contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px', color: '#F5F5F5' }} />
-                        <Legend />
-                        <Area type="monotone" dataKey="upper" name="Upper 95% Bound" stroke="none" fill="#D4A843" fillOpacity={0.15} />
-                        <Area type="monotone" dataKey="lower" name="Lower 95% Bound" stroke="none" fill="#1E1E1E" fillOpacity={0.8} />
-                        <Line type="monotone" dataKey="actual" name="Historical Actual" stroke="#2ECC71" strokeWidth={2} dot={{ r: 3 }} />
-                        <Line type="monotone" dataKey="predicted" name="Predicted Trend" stroke={GOLD} strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-
-                    <div style={{
-                      marginTop: '12px',
-                      padding: '8px 12px',
-                      background: '#242424',
-                      borderRadius: '6px',
-                      fontSize: '0.75rem',
-                      color: '#888',
-                      borderLeft: `3px solid ${GOLD}`
-                    }}>
-                      💡 <strong>Statistical Projection Note:</strong> Estimates use past registration velocity and Ordinary Least Squares trend fitting with a 95% confidence band. Spikes around campaign deadlines or on-spot registrations may cause actual numbers to deviate.
-                    </div>
-                  </>
-                )}
+                <div className="kpi-grid" style={{ marginBottom: '16px' }}>
+                  <div className="kpi-card" style={{ padding: '12px' }}>
+                    <div className="kpi-card__label">Daily Velocity</div>
+                    <div className="kpi-card__value" style={{ fontSize: '1.3rem' }}>~{forecastData.metrics.averageDailyRate} / day</div>
+                  </div>
+                  <div className="kpi-card" style={{ padding: '12px' }}>
+                    <div className="kpi-card__label">Projected Total ({forecastHorizon}d)</div>
+                    <div className="kpi-card__value kpi-card__value--gold" style={{ fontSize: '1.3rem' }}>{forecastData.metrics.projectedTotal}</div>
+                  </div>
+                  <div className="kpi-card" style={{ padding: '12px' }}>
+                    <div className="kpi-card__label">Goal Completion Date</div>
+                    <div className="kpi-card__value" style={{ fontSize: '1.2rem', color: '#2ECC71' }}>{forecastData.metrics.projectedGoalDate || 'Calculating...'}</div>
+                  </div>
+                </div>
               </div>
             )}
           </>
         )}
+
+        {/* ════════════════════════ TAB 2: FINANCIALS & EXPENSES ════════════════════════ */}
+        {activeTab === 'expenses' && hasFinancialAccess && (
+          <div className="animate-fade-in">
+            {/* Executive Financial Metrics */}
+            <div className="kpi-grid" style={{ marginBottom: '24px' }}>
+              <div className="kpi-card">
+                <FiDollarSign className="kpi-card__icon" />
+                <div className="kpi-card__label">Total Gross Revenue</div>
+                <div className="kpi-card__value kpi-card__value--gold">
+                  ₹{(financials?.financials.grossRevenue || 0).toLocaleString()}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#B0B0B0', marginTop: '4px' }}>
+                  From {financials?.financials.totalRegistrations || 0} Registrations
+                </div>
+              </div>
+
+              <div className="kpi-card">
+                <FiCreditCard className="kpi-card__icon" style={{ color: RED_LIGHT }} />
+                <div className="kpi-card__label">Total Expenses</div>
+                <div className="kpi-card__value" style={{ color: RED_LIGHT }}>
+                  ₹{(financials?.financials.totalExpenses || 0).toLocaleString()}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#B0B0B0', marginTop: '4px' }}>
+                  {expenses.length} Expense items recorded
+                </div>
+              </div>
+
+              <div className="kpi-card" style={{ border: '1px solid rgba(46, 204, 113, 0.4)' }}>
+                <FiTrendingUp className="kpi-card__icon" style={{ color: GREEN }} />
+                <div className="kpi-card__label">Net Profit / Balance</div>
+                <div className="kpi-card__value" style={{ color: GREEN }}>
+                  ₹{(financials?.financials.netBalance || 0).toLocaleString()}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: GREEN, marginTop: '4px' }}>
+                  {financials?.financials.profitMargin || 0}% Net Margin
+                </div>
+              </div>
+
+              <div className="kpi-card">
+                <FiTag className="kpi-card__icon" />
+                <div className="kpi-card__label">Expense-to-Revenue Ratio</div>
+                <div className="kpi-card__value">
+                  {financials?.financials.expenseRatio || 0}%
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#B0B0B0', marginTop: '4px' }}>
+                  Budget utilization
+                </div>
+              </div>
+            </div>
+
+            {/* Expenses Visual Breakdown */}
+            <div className="charts-grid" style={{ marginBottom: '24px' }}>
+              {/* Category Spending Donut Chart */}
+              <div className="chart-card">
+                <div className="chart-card__title">🍩 Categorical Spending Distribution</div>
+                {financials && financials.categoryBreakdown.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={financials.categoryBreakdown}
+                        cx="50%" cy="50%"
+                        innerRadius={60} outerRadius={95}
+                        paddingAngle={4}
+                        dataKey="amount"
+                        nameKey="category"
+                      >
+                        {financials.categoryBreakdown.map((entry) => (
+                          <Cell
+                            key={entry.category}
+                            fill={CATEGORY_COLORS[entry.category] || GOLD}
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(val: any) => [`₹${Number(val).toLocaleString()}`, 'Amount']}
+                        contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px' }}
+                      />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div style={{ height: '240px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888' }}>
+                    No expenses recorded in this period.
+                  </div>
+                )}
+              </div>
+
+              {/* Category Breakdown Bars */}
+              <div className="chart-card">
+                <div className="chart-card__title">📊 Spending by Department / Area</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
+                  {financials?.categoryBreakdown.map((cat) => (
+                    <div key={cat.category}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                        <span>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              width: '10px',
+                              height: '10px',
+                              borderRadius: '50%',
+                              backgroundColor: CATEGORY_COLORS[cat.category] || GOLD,
+                              marginRight: '8px',
+                            }}
+                          />
+                          <strong>{cat.category}</strong>
+                        </span>
+                        <span style={{ color: GOLD }}>₹{cat.amount.toLocaleString()} ({cat.percentage}%)</span>
+                      </div>
+                      <div style={{ background: '#2C2C2C', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            background: CATEGORY_COLORS[cat.category] || GOLD,
+                            width: `${cat.percentage}%`,
+                            height: '100%',
+                            borderRadius: '4px',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {(!financials || financials.categoryBreakdown.length === 0) && (
+                    <div style={{ textAlign: 'center', color: '#888', padding: '40px 0' }}>
+                      No categorical expenses logged yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Expenses Records Table & Manager */}
+            <div className="chart-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                <div className="chart-card__title" style={{ marginBottom: 0 }}>
+                  📋 Itemized Expenses Log ({filteredExpenses.length})
+                </div>
+
+                {/* Filters and Search */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <div style={{ position: 'relative' }}>
+                    <FiSearch style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: '10px', color: '#808080' }} />
+                    <input
+                      type="text"
+                      className="form-group__input"
+                      placeholder="Search title, vendor..."
+                      value={expenseSearch}
+                      onChange={(e) => setExpenseSearch(e.target.value)}
+                      style={{ paddingLeft: '32px', width: '180px', fontSize: '0.8rem', padding: '6px 10px 6px 32px' }}
+                    />
+                  </div>
+
+                  <select
+                    className="form-group__input"
+                    value={expenseCategoryFilter}
+                    onChange={(e) => setExpenseCategoryFilter(e.target.value)}
+                    style={{ width: '160px', fontSize: '0.8rem', padding: '6px 8px' }}
+                  >
+                    <option value="">All Categories</option>
+                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+
+                  <select
+                    className="form-group__input"
+                    value={expensePaymentFilter}
+                    onChange={(e) => setExpensePaymentFilter(e.target.value)}
+                    style={{ width: '130px', fontSize: '0.8rem', padding: '6px 8px' }}
+                  >
+                    <option value="">All Modes</option>
+                    <option value="GPAY">GPAY</option>
+                    <option value="CASH">CASH</option>
+                    <option value="BANK TRANSFER">BANK</option>
+                    <option value="OTHER">OTHER</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div style={{ overflowX: 'auto' }}>
+                <table className="table" style={{ width: '100%', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '10px' }}>Date</th>
+                      <th style={{ textAlign: 'left', padding: '10px' }}>Expense Item</th>
+                      <th style={{ textAlign: 'left', padding: '10px' }}>Category</th>
+                      <th style={{ textAlign: 'left', padding: '10px' }}>Vendor / Payee</th>
+                      <th style={{ textAlign: 'left', padding: '10px' }}>Payment Mode</th>
+                      <th style={{ textAlign: 'right', padding: '10px' }}>Amount (₹)</th>
+                      <th style={{ textAlign: 'center', padding: '10px' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredExpenses.map((exp) => (
+                      <tr key={exp.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '10px', whiteSpace: 'nowrap', color: '#B0B0B0' }}>
+                          {exp.expenseDate ? format(new Date(exp.expenseDate), 'dd MMM yyyy') : '—'}
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <strong style={{ color: '#F5F5F5' }}>{exp.title}</strong>
+                          {exp.notes && (
+                            <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '2px' }}>
+                              {exp.notes}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <span
+                            className="badge-cat"
+                            style={{
+                              backgroundColor: `${CATEGORY_COLORS[exp.category] || GOLD}22`,
+                              color: CATEGORY_COLORS[exp.category] || GOLD,
+                              border: `1px solid ${CATEGORY_COLORS[exp.category] || GOLD}55`,
+                            }}
+                          >
+                            {exp.category}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px', color: '#B0B0B0' }}>{exp.vendor || '—'}</td>
+                        <td style={{ padding: '10px' }}>
+                          <span style={{ fontSize: '0.75rem', background: '#252525', padding: '2px 6px', borderRadius: '4px', border: '1px solid #404040' }}>
+                            {exp.paymentMethod}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: 'bold', color: GOLD }}>
+                          ₹{exp.amount.toLocaleString()}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                            <button
+                              className="btn btn--ghost btn--sm"
+                              style={{ padding: '4px 8px' }}
+                              onClick={() => handleOpenEditExpense(exp)}
+                              title="Edit Expense"
+                            >
+                              <FiEdit2 />
+                            </button>
+                            <button
+                              className="btn btn--ghost btn--sm"
+                              style={{ padding: '4px 8px', color: '#E74C3C' }}
+                              onClick={() => handleDeleteExpense(exp.id, exp.title)}
+                              title="Delete Expense"
+                            >
+                              <FiTrash2 />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredExpenses.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
+                          No expenses matching the filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
-      {/* Footer */}
-      <footer style={{
-        background: '#1A1A1A', borderTop: `2px solid ${GOLD}`, padding: '12px 32px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#808080'
-      }}>
-        <span style={{ color: GOLD, fontWeight: 700 }}>FAC PYROS — That's How We Rock It!</span>
-        <span>Registration Analytics Dashboard v1.0</span>
-      </footer>
+      {/* ════════════════════════ ADD / EDIT EXPENSE MODAL ════════════════════════ */}
+      {modalOpen && (
+        <div className="modal-backdrop animate-fade-in" onClick={() => setModalOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">
+                {editingExpense ? <FiEdit2 /> : <FiPlus />}
+                {editingExpense ? 'Edit Expense Record' : 'Record New Expense'}
+              </div>
+              <button className="modal-close" onClick={() => setModalOpen(false)}>×</button>
+            </div>
+
+            {formError && (
+              <div className="alert-item alert-item--danger" style={{ marginBottom: '16px' }}>
+                <FiAlertTriangle /> {formError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveExpense}>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-group__label">Expense Title / Item Description *</label>
+                <input
+                  type="text"
+                  className="form-group__input"
+                  placeholder="e.g. Auditorium Sound System & Stage Lighting"
+                  value={expenseForm.title}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, title: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                <div className="form-group">
+                  <label className="form-group__label">Category *</label>
+                  <select
+                    className="form-group__input"
+                    value={expenseForm.category}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
+                    required
+                  >
+                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-group__label">Amount (₹) *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1"
+                    className="form-group__input"
+                    placeholder="e.g. 12000"
+                    value={expenseForm.amount}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                <div className="form-group">
+                  <label className="form-group__label">Expense Date *</label>
+                  <input
+                    type="date"
+                    className="form-group__input"
+                    value={expenseForm.expenseDate}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, expenseDate: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-group__label">Payment Method *</label>
+                  <select
+                    className="form-group__input"
+                    value={expenseForm.paymentMethod}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, paymentMethod: e.target.value })}
+                    required
+                  >
+                    <option value="GPAY">GPAY / UPI</option>
+                    <option value="CASH">Cash</option>
+                    <option value="BANK TRANSFER">Bank Transfer</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-group__label">Vendor / Payee Name</label>
+                <input
+                  type="text"
+                  className="form-group__input"
+                  placeholder="e.g. SoundPro Event Rentals"
+                  value={expenseForm.vendor}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, vendor: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '24px' }}>
+                <label className="form-group__label">Additional Notes / Receipt Details</label>
+                <textarea
+                  className="form-group__input"
+                  rows={3}
+                  placeholder="e.g. Advance paid on Sept 2, final settlement on Sept 4 with bill #1042"
+                  value={expenseForm.notes}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => setModalOpen(false)}
+                  disabled={formSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  disabled={formSubmitting}
+                >
+                  {formSubmitting ? 'Saving...' : editingExpense ? 'Update Expense' : 'Save Expense Record'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
-
-function formatTimeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
 }

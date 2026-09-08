@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
-import { MOCK_USERS, MOCK_REGISTRATIONS, MockRegistration } from './mockData.js';
+import { MOCK_USERS, MOCK_REGISTRATIONS, MockRegistration, MOCK_EXPENSES, MockExpense } from './mockData.js';
 dotenv.config();
 
 let isPostgresConnected = false;
@@ -700,6 +700,118 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
     }
 
     filtered.sort((a, b) => b.registration_date.localeCompare(a.registration_date) || ((b.s_no || 0) - (a.s_no || 0)));
+    return { rows: filtered as unknown as T[] };
+  }
+
+  // 41. Insert into expenses
+  if (normalized.startsWith('INSERT INTO EXPENSES')) {
+    const newId = 'exp_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const expense: MockExpense = {
+      id: newId,
+      title: params[0] || 'Untitled Expense',
+      category: params[1] || 'Miscellaneous',
+      amount: Number(params[2]) || 0,
+      expense_date: params[3] || new Date().toISOString().split('T')[0],
+      payment_method: params[4] || 'CASH',
+      vendor: params[5] || null,
+      notes: params[6] || null,
+      created_by: params[7] || null,
+      created_at: new Date().toISOString(),
+    };
+    MOCK_EXPENSES.unshift(expense);
+    return { rows: [expense] as unknown as T[] };
+  }
+
+  // 42. Update expenses
+  if (normalized.startsWith('UPDATE EXPENSES')) {
+    const id = params[params.length - 1];
+    const index = MOCK_EXPENSES.findIndex(e => e.id === id);
+    if (index >= 0) {
+      if (params.length === 8) {
+        // Standard full update from routes/expenses.ts: [title, category, amount, date, payment, vendor, notes, id]
+        MOCK_EXPENSES[index] = {
+          ...MOCK_EXPENSES[index],
+          title: params[0] !== undefined ? params[0] : MOCK_EXPENSES[index].title,
+          category: params[1] !== undefined ? params[1] : MOCK_EXPENSES[index].category,
+          amount: params[2] !== undefined ? Number(params[2]) : MOCK_EXPENSES[index].amount,
+          expense_date: params[3] !== undefined ? params[3] : MOCK_EXPENSES[index].expense_date,
+          payment_method: params[4] !== undefined ? params[4] : MOCK_EXPENSES[index].payment_method,
+          vendor: params[5] !== undefined ? params[5] : MOCK_EXPENSES[index].vendor,
+          notes: params[6] !== undefined ? params[6] : MOCK_EXPENSES[index].notes,
+        };
+      } else if (params.length === 3) {
+        // Partial update: [title, amount, id]
+        MOCK_EXPENSES[index] = {
+          ...MOCK_EXPENSES[index],
+          title: params[0] !== undefined ? params[0] : MOCK_EXPENSES[index].title,
+          amount: params[1] !== undefined ? Number(params[1]) : MOCK_EXPENSES[index].amount,
+        };
+      }
+      return { rows: [MOCK_EXPENSES[index]] as unknown as T[] };
+    }
+    return { rows: [] };
+  }
+
+  // 43. Delete expense
+  if (normalized.startsWith('DELETE FROM EXPENSES')) {
+    const id = params[0];
+    const index = MOCK_EXPENSES.findIndex(e => e.id === id);
+    if (index >= 0) {
+      const removed = MOCK_EXPENSES.splice(index, 1);
+      return { rows: removed as unknown as T[] };
+    }
+    return { rows: [] };
+  }
+
+  // 44. Expenses Category Breakdown
+  if (normalized.includes('FROM EXPENSES') && normalized.includes('GROUP BY CATEGORY')) {
+    const start = params[0];
+    const end = params[1];
+    const filtered = MOCK_EXPENSES.filter(e => !start || !end || (e.expense_date >= start && e.expense_date <= end));
+
+    const catMap: Record<string, { total: number; count: number }> = {};
+    for (const e of filtered) {
+      const cat = e.category || 'Miscellaneous';
+      if (!catMap[cat]) catMap[cat] = { total: 0, count: 0 };
+      catMap[cat].total += Number(e.amount);
+      catMap[cat].count++;
+    }
+
+    const rows = Object.entries(catMap)
+      .sort((a, b) => b[1].total - a[1].total)
+      .map(([category, d]) => ({
+        category,
+        total: String(d.total),
+        total_amount: String(d.total),
+        count: String(d.count),
+      }));
+    return { rows: rows as unknown as T[] };
+  }
+
+  // 45. Expenses Total Aggregation
+  if (normalized.includes('SELECT SUM(AMOUNT)') && normalized.includes('FROM EXPENSES')) {
+    const start = params[0];
+    const end = params[1];
+    const filtered = MOCK_EXPENSES.filter(e => !start || !end || (e.expense_date >= start && e.expense_date <= end));
+    const total = filtered.reduce((sum, e) => sum + Number(e.amount), 0);
+    return { rows: [{ total_expenses: String(total), count: String(filtered.length) }] as unknown as T[] };
+  }
+
+  // 46. Generic Expenses Listing / Single item fetch
+  if (normalized.includes('FROM EXPENSES')) {
+    if (normalized.includes('WHERE ID = $1') || normalized.includes('WHERE ID =')) {
+      const targetId = params[0];
+      const match = MOCK_EXPENSES.filter(e => e.id === targetId);
+      return { rows: match as unknown as T[] };
+    }
+
+    let filtered = [...MOCK_EXPENSES];
+    const start = params[0];
+    const end = params[1];
+    if (start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      filtered = filtered.filter(e => e.expense_date >= start && e.expense_date <= end);
+    }
+    filtered.sort((a, b) => b.expense_date.localeCompare(a.expense_date) || b.created_at.localeCompare(a.created_at));
     return { rows: filtered as unknown as T[] };
   }
 
