@@ -706,6 +706,7 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
   // 41. Insert into expenses
   if (normalized.startsWith('INSERT INTO EXPENSES')) {
     const newId = 'exp_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const hasReceiptParams = params.length >= 10;
     const expense: MockExpense = {
       id: newId,
       title: params[0] || 'Untitled Expense',
@@ -715,7 +716,9 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
       payment_method: params[4] || 'CASH',
       vendor: params[5] || null,
       notes: params[6] || null,
-      created_by: params[7] || null,
+      receipt_url: hasReceiptParams ? params[7] || null : null,
+      receipt_name: hasReceiptParams ? params[8] || null : null,
+      created_by: hasReceiptParams ? params[9] || null : params[7] || null,
       created_at: new Date().toISOString(),
     };
     MOCK_EXPENSES.unshift(expense);
@@ -727,8 +730,22 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
     const id = params[params.length - 1];
     const index = MOCK_EXPENSES.findIndex(e => e.id === id);
     if (index >= 0) {
-      if (params.length === 8) {
-        // Standard full update from routes/expenses.ts: [title, category, amount, date, payment, vendor, notes, id]
+      if (params.length === 10) {
+        // Standard full update from routes/expenses.ts: [title, category, amount, date, payment, vendor, notes, receipt_url, receipt_name, id]
+        MOCK_EXPENSES[index] = {
+          ...MOCK_EXPENSES[index],
+          title: params[0] !== undefined ? params[0] : MOCK_EXPENSES[index].title,
+          category: params[1] !== undefined ? params[1] : MOCK_EXPENSES[index].category,
+          amount: params[2] !== undefined ? Number(params[2]) : MOCK_EXPENSES[index].amount,
+          expense_date: params[3] !== undefined ? params[3] : MOCK_EXPENSES[index].expense_date,
+          payment_method: params[4] !== undefined ? params[4] : MOCK_EXPENSES[index].payment_method,
+          vendor: params[5] !== undefined ? params[5] : MOCK_EXPENSES[index].vendor,
+          notes: params[6] !== undefined ? params[6] : MOCK_EXPENSES[index].notes,
+          receipt_url: params[7] !== undefined ? params[7] : MOCK_EXPENSES[index].receipt_url,
+          receipt_name: params[8] !== undefined ? params[8] : MOCK_EXPENSES[index].receipt_name,
+        };
+      } else if (params.length === 8) {
+        // Legacy full update without receipts
         MOCK_EXPENSES[index] = {
           ...MOCK_EXPENSES[index],
           title: params[0] !== undefined ? params[0] : MOCK_EXPENSES[index].title,

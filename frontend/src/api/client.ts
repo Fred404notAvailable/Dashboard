@@ -115,6 +115,8 @@ export const expensesApi = {
     paymentMethod?: string;
     vendor?: string;
     notes?: string;
+    receiptUrl?: string | null;
+    receiptName?: string | null;
   }) => api.post('/api/expenses', data),
   update: (id: string, data: Partial<{
     title: string;
@@ -124,6 +126,8 @@ export const expensesApi = {
     paymentMethod: string;
     vendor: string;
     notes: string;
+    receiptUrl: string | null;
+    receiptName: string | null;
   }>) => api.put(`/api/expenses/${id}`, data),
   delete: (id: string) => api.delete(`/api/expenses/${id}`),
 };

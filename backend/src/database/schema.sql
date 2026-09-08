@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS expenses (
   payment_method TEXT NOT NULL,
   vendor TEXT,
   notes TEXT,
+  receipt_url TEXT,
+  receipt_name TEXT,
   created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ DEFAULT now()
 );

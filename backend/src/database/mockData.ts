@@ -26,6 +26,8 @@ export interface MockExpense {
   payment_method: string;
   vendor: string | null;
   notes: string | null;
+  receipt_url?: string | null;
+  receipt_name?: string | null;
   created_by: string | null;
   created_at: string;
 }
@@ -79,6 +81,8 @@ export const MOCK_EXPENSES: MockExpense[] = [
     payment_method: 'GPAY',
     vendor: 'Crown Awards & Trophies',
     notes: 'Medals and engraved shields for all 3 flagship events',
+    receipt_url: null,
+    receipt_name: null,
     created_by: '00000000-0000-0000-0000-000000000000',
     created_at: '2026-09-02T10:00:00Z',
   },
@@ -91,6 +95,8 @@ export const MOCK_EXPENSES: MockExpense[] = [
     payment_method: 'BANK TRANSFER',
     vendor: 'SoundPro Event Rentals',
     notes: 'Stage line array speakers, RGB stage pars and smoke machine',
+    receipt_url: null,
+    receipt_name: null,
     created_by: '00000000-0000-0000-0000-000000000000',
     created_at: '2026-09-04T14:30:00Z',
   },
@@ -103,6 +109,8 @@ export const MOCK_EXPENSES: MockExpense[] = [
     payment_method: 'GPAY',
     vendor: 'Speedy Print Works',
     notes: '200 custom PYROS lanyards and spot registration receipts',
+    receipt_url: null,
+    receipt_name: null,
     created_by: '00000000-0000-0000-0000-000000000000',
     created_at: '2026-09-01T11:15:00Z',
   },
@@ -115,6 +123,8 @@ export const MOCK_EXPENSES: MockExpense[] = [
     payment_method: 'CASH',
     vendor: 'Campus Delight Caterers',
     notes: 'Lunch boxes, coffee, and water bottles for external jury members',
+    receipt_url: null,
+    receipt_name: null,
     created_by: '00000000-0000-0000-0000-000000000000',
     created_at: '2026-09-07T13:00:00Z',
   },
@@ -127,6 +137,8 @@ export const MOCK_EXPENSES: MockExpense[] = [
     payment_method: 'GPAY',
     vendor: 'Creative Flex & Signage',
     notes: '20x10ft main stage banner and 2 registration desk banners',
+    receipt_url: null,
+    receipt_name: null,
     created_by: '00000000-0000-0000-0000-000000000000',
     created_at: '2026-09-03T16:00:00Z',
   },

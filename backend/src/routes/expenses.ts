@@ -32,7 +32,7 @@ export async function expenseRoutes(app: FastifyInstance) {
 
       // Fetch all matching expenses
       const result = await query(
-        `SELECT id, title, category, amount, expense_date, payment_method, vendor, notes, created_by, created_at
+        `SELECT id, title, category, amount, expense_date, payment_method, vendor, notes, receipt_url, receipt_name, created_by, created_at
          FROM expenses
          WHERE expense_date BETWEEN $1 AND $2
          ORDER BY expense_date DESC, created_at DESC`,
@@ -48,6 +48,8 @@ export async function expenseRoutes(app: FastifyInstance) {
         paymentMethod: r.payment_method,
         vendor: r.vendor,
         notes: r.notes,
+        receiptUrl: r.receipt_url || null,
+        receiptName: r.receipt_name || null,
         createdBy: r.created_by,
         createdAt: r.created_at,
       }));
@@ -203,6 +205,8 @@ export async function expenseRoutes(app: FastifyInstance) {
         paymentMethod = 'CASH',
         vendor,
         notes,
+        receiptUrl,
+        receiptName,
       } = request.body as {
         title?: string;
         category?: string;
@@ -211,6 +215,8 @@ export async function expenseRoutes(app: FastifyInstance) {
         paymentMethod?: string;
         vendor?: string;
         notes?: string;
+        receiptUrl?: string | null;
+        receiptName?: string | null;
       };
 
       if (!title?.trim()) {
@@ -231,8 +237,8 @@ export async function expenseRoutes(app: FastifyInstance) {
           : new Date().toISOString().split('T')[0];
 
       const res = await query(
-        `INSERT INTO expenses (title, category, amount, expense_date, payment_method, vendor, notes, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO expenses (title, category, amount, expense_date, payment_method, vendor, notes, receipt_url, receipt_name, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
         [
           title.trim(),
@@ -242,6 +248,8 @@ export async function expenseRoutes(app: FastifyInstance) {
           paymentMethod.toUpperCase().trim(),
           vendor?.trim() || null,
           notes?.trim() || null,
+          receiptUrl || null,
+          receiptName?.trim() || null,
           user.userId,
         ]
       );
@@ -255,12 +263,17 @@ export async function expenseRoutes(app: FastifyInstance) {
           title,
           amount: numAmount,
           category,
+          hasReceipt: !!receiptUrl,
         }
       );
 
       return reply.status(201).send({
         message: 'Expense added successfully',
-        expense: created,
+        expense: {
+          ...created,
+          receiptUrl: created.receipt_url || receiptUrl || null,
+          receiptName: created.receipt_name || receiptName || null,
+        },
       });
     }
   );
@@ -280,6 +293,8 @@ export async function expenseRoutes(app: FastifyInstance) {
         paymentMethod,
         vendor,
         notes,
+        receiptUrl,
+        receiptName,
       } = request.body as {
         title?: string;
         category?: string;
@@ -288,6 +303,8 @@ export async function expenseRoutes(app: FastifyInstance) {
         paymentMethod?: string;
         vendor?: string;
         notes?: string;
+        receiptUrl?: string | null;
+        receiptName?: string | null;
       };
 
       if (amount !== undefined && (isNaN(Number(amount)) || Number(amount) <= 0)) {
@@ -304,8 +321,10 @@ export async function expenseRoutes(app: FastifyInstance) {
              expense_date = COALESCE($4, expense_date),
              payment_method = COALESCE($5, payment_method),
              vendor = COALESCE($6, vendor),
-             notes = COALESCE($7, notes)
-         WHERE id = $8
+             notes = COALESCE($7, notes),
+             receipt_url = COALESCE($8, receipt_url),
+             receipt_name = COALESCE($9, receipt_name)
+         WHERE id = $10
          RETURNING *`,
         [
           title?.trim(),
@@ -315,6 +334,8 @@ export async function expenseRoutes(app: FastifyInstance) {
           paymentMethod?.toUpperCase().trim(),
           vendor?.trim(),
           notes?.trim(),
+          receiptUrl !== undefined ? receiptUrl : undefined,
+          receiptName !== undefined ? receiptName : undefined,
           id,
         ]
       );
@@ -328,9 +349,14 @@ export async function expenseRoutes(app: FastifyInstance) {
         amount,
       });
 
+      const updated = res.rows[0];
       return {
         message: 'Expense updated successfully',
-        expense: res.rows[0],
+        expense: {
+          ...updated,
+          receiptUrl: updated.receipt_url !== undefined ? updated.receipt_url : receiptUrl,
+          receiptName: updated.receipt_name !== undefined ? updated.receipt_name : receiptName,
+        },
       };
     }
   );

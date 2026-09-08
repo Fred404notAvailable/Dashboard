@@ -10,7 +10,7 @@ import { format, subDays, startOfMonth, endOfMonth, subMonths, startOfQuarter, s
 import {
   FiUsers, FiDollarSign, FiTrendingUp, FiDownload, FiRefreshCw, FiLogOut,
   FiBarChart2, FiActivity, FiTarget, FiAlertTriangle, FiCheckCircle, FiClock,
-  FiEdit2, FiLock, FiPlus, FiTrash2, FiSearch, FiCreditCard, FiTag
+  FiEdit2, FiLock, FiPlus, FiTrash2, FiSearch, FiCreditCard, FiTag, FiPaperclip, FiFileText
 } from 'react-icons/fi';
 
 const GOLD = '#D4A843';
@@ -83,6 +83,8 @@ interface ExpenseItem {
   paymentMethod: string;
   vendor: string | null;
   notes: string | null;
+  receiptUrl?: string | null;
+  receiptName?: string | null;
   createdBy: string | null;
   createdAt: string;
 }
@@ -163,7 +165,19 @@ export default function DashboardPage() {
   const [expensePaymentFilter, setExpensePaymentFilter] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
-  const [expenseForm, setExpenseForm] = useState({
+  const [viewingReceipt, setViewingReceipt] = useState<{ url: string; name: string; title: string; amount: number } | null>(null);
+  const [receiptFileLoading, setReceiptFileLoading] = useState(false);
+  const [expenseForm, setExpenseForm] = useState<{
+    title: string;
+    category: string;
+    amount: string;
+    expenseDate: string;
+    paymentMethod: string;
+    vendor: string;
+    notes: string;
+    receiptUrl: string | null;
+    receiptName: string | null;
+  }>({
     title: '',
     category: 'Venue & Stage',
     amount: '',
@@ -171,6 +185,8 @@ export default function DashboardPage() {
     paymentMethod: 'GPAY',
     vendor: '',
     notes: '',
+    receiptUrl: null,
+    receiptName: null,
   });
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
@@ -350,6 +366,8 @@ export default function DashboardPage() {
       paymentMethod: 'GPAY',
       vendor: '',
       notes: '',
+      receiptUrl: null,
+      receiptName: null,
     });
     setFormError('');
     setModalOpen(true);
@@ -365,9 +383,46 @@ export default function DashboardPage() {
       paymentMethod: item.paymentMethod || 'GPAY',
       vendor: item.vendor || '',
       notes: item.notes || '',
+      receiptUrl: item.receiptUrl || null,
+      receiptName: item.receiptName || null,
     });
     setFormError('');
     setModalOpen(true);
+  };
+
+  const handleReceiptFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError('Receipt file exceeds 5MB size limit.');
+      return;
+    }
+
+    setReceiptFileLoading(true);
+    setFormError('');
+    const reader = new FileReader();
+    reader.onload = () => {
+      setExpenseForm(prev => ({
+        ...prev,
+        receiptUrl: reader.result as string,
+        receiptName: file.name,
+      }));
+      setReceiptFileLoading(false);
+    };
+    reader.onerror = () => {
+      setFormError('Failed to read selected bill file.');
+      setReceiptFileLoading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleClearReceipt = () => {
+    setExpenseForm(prev => ({
+      ...prev,
+      receiptUrl: null,
+      receiptName: null,
+    }));
   };
 
   const handleDeleteExpense = async (id: string, title: string) => {
@@ -406,6 +461,8 @@ export default function DashboardPage() {
           paymentMethod: expenseForm.paymentMethod,
           vendor: expenseForm.vendor.trim(),
           notes: expenseForm.notes.trim(),
+          receiptUrl: expenseForm.receiptUrl,
+          receiptName: expenseForm.receiptName,
         });
       } else {
         await expensesApi.create({
@@ -416,6 +473,8 @@ export default function DashboardPage() {
           paymentMethod: expenseForm.paymentMethod,
           vendor: expenseForm.vendor.trim(),
           notes: expenseForm.notes.trim(),
+          receiptUrl: expenseForm.receiptUrl,
+          receiptName: expenseForm.receiptName,
         });
       }
       setModalOpen(false);
@@ -1344,6 +1403,7 @@ export default function DashboardPage() {
                       <th style={{ textAlign: 'left', padding: '10px' }}>Vendor / Payee</th>
                       <th style={{ textAlign: 'left', padding: '10px' }}>Payment Mode</th>
                       <th style={{ textAlign: 'right', padding: '10px' }}>Amount (₹)</th>
+                      <th style={{ textAlign: 'center', padding: '10px' }}>Bill / Receipt</th>
                       <th style={{ textAlign: 'center', padding: '10px' }}>Actions</th>
                     </tr>
                   </thead>
@@ -1383,6 +1443,25 @@ export default function DashboardPage() {
                           ₹{exp.amount.toLocaleString()}
                         </td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
+                          {exp.receiptUrl ? (
+                            <button
+                              type="button"
+                              className="badge-receipt"
+                              onClick={() => setViewingReceipt({
+                                url: exp.receiptUrl!,
+                                name: exp.receiptName || 'Bill Receipt',
+                                title: exp.title,
+                                amount: exp.amount,
+                              })}
+                              title="Click to view attached bill"
+                            >
+                              <FiFileText /> View Bill
+                            </button>
+                          ) : (
+                            <span style={{ color: '#666', fontSize: '0.8rem' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
                             <button
                               className="btn btn--ghost btn--sm"
@@ -1406,7 +1485,7 @@ export default function DashboardPage() {
                     ))}
                     {filteredExpenses.length === 0 && (
                       <tr>
-                        <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
+                        <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
                           No matching expense records found.
                         </td>
                       </tr>
@@ -1542,12 +1621,64 @@ export default function DashboardPage() {
                 />
               </div>
 
+              {/* Attach Bill / Receipt Dropzone */}
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label className="form-group__label">
+                  <FiPaperclip style={{ marginRight: '4px' }} /> Attach Bill / Invoice Receipt (Optional)
+                </label>
+
+                {expenseForm.receiptUrl ? (
+                  <div className="receipt-preview-card">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      {expenseForm.receiptUrl.startsWith('data:image/') ? (
+                        <img src={expenseForm.receiptUrl} alt="Bill Preview" className="receipt-preview-thumb" />
+                      ) : (
+                        <div style={{ width: '48px', height: '48px', background: '#181818', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: GOLD, border: '1px solid rgba(255,255,255,0.1)' }}>
+                          <FiFileText style={{ fontSize: '1.5rem' }} />
+                        </div>
+                      )}
+                      <div>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#F5F5F5', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {expenseForm.receiptName || 'Attached Bill Document'}
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: '#2ECC71' }}>✓ Receipt Attached</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={handleClearReceipt}
+                      style={{ color: '#E74C3C', fontSize: '0.8rem', padding: '4px 8px' }}
+                    >
+                      <FiTrash2 style={{ marginRight: '4px' }} /> Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="receipt-dropzone">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/jpg,application/pdf"
+                      onChange={handleReceiptFileChange}
+                    />
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                      <FiPaperclip style={{ fontSize: '1.4rem', color: GOLD }} />
+                      <span style={{ fontSize: '0.85rem', color: '#E0E0E0' }}>
+                        {receiptFileLoading ? 'Reading bill file...' : 'Click or Drag & Drop to attach Bill / Receipt'}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: '#888' }}>
+                        Supports PNG, JPG, WEBP, PDF (Max 5MB)
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="form-group" style={{ marginBottom: '24px' }}>
-                <label className="form-group__label">Additional Notes / Receipt Details</label>
+                <label className="form-group__label">Additional Notes / Details</label>
                 <textarea
                   className="form-group__input"
-                  rows={3}
-                  placeholder="e.g. Advance paid on Sept 2, final settlement on Sept 4 with bill #1042"
+                  rows={2}
+                  placeholder="e.g. Advance paid on Sept 2, settlement on Sept 4 with bill #1042"
                   value={expenseForm.notes}
                   onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
                 />
@@ -1571,6 +1702,57 @@ export default function DashboardPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Receipt / Bill Viewer Modal */}
+      {viewingReceipt && (
+        <div className="modal-backdrop" onClick={() => setViewingReceipt(null)}>
+          <div className="modal-card modal-card--lg" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ margin: 0, color: GOLD, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FiFileText /> {viewingReceipt.title}
+                </h3>
+                <span style={{ fontSize: '0.8rem', color: '#B0B0B0' }}>
+                  Amount: ₹{viewingReceipt.amount.toLocaleString()} • File: {viewingReceipt.name}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <a
+                  href={viewingReceipt.url}
+                  download={viewingReceipt.name || 'expense_bill'}
+                  className="btn btn--secondary btn--sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <FiDownload /> Download
+                </a>
+                <button
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => setViewingReceipt(null)}
+                  style={{ fontSize: '1.2rem', padding: '4px 8px' }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="receipt-viewer-content">
+              {viewingReceipt.url.startsWith('data:image/') ? (
+                <img
+                  src={viewingReceipt.url}
+                  alt={viewingReceipt.name}
+                  className="receipt-viewer-img"
+                />
+              ) : (
+                <iframe
+                  src={viewingReceipt.url}
+                  title={viewingReceipt.name}
+                  style={{ width: '100%', height: '60vh', border: 'none', borderRadius: '4px' }}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}

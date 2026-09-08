@@ -69,4 +69,44 @@ describe('Expenses Database and Calculations', () => {
     const verifyDelete = await query('SELECT * FROM expenses WHERE id = $1', [newId]);
     expect(verifyDelete.rows.length).toBe(0);
   });
+
+  it('should attach, retrieve, and update bill receipt attachments', async () => {
+    const sampleReceipt = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const sampleFilename = 'stage_invoice_001.png';
+
+    // 1. Create with receipt
+    const insertRes = await query<{ id: string; receipt_url: string; receipt_name: string }>(
+      `INSERT INTO expenses (title, category, amount, expense_date, payment_method, vendor, notes, receipt_url, receipt_name, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [
+        'Sound Rental Settlement',
+        'Audio / Visual & Lighting',
+        7500,
+        '2026-09-05',
+        'GPAY',
+        'ProSound Rentals',
+        'Final settlement invoice',
+        sampleReceipt,
+        sampleFilename,
+        'overall-user-id',
+      ]
+    );
+    expect(insertRes.rows.length).toBe(1);
+    const item = insertRes.rows[0];
+    expect(item.receipt_url).toBe(sampleReceipt);
+    expect(item.receipt_name).toBe(sampleFilename);
+
+    // 2. Fetch and check
+    const fetched = await query<{ id: string; receipt_url: string; receipt_name: string }>(
+      'SELECT * FROM expenses WHERE id = $1',
+      [item.id]
+    );
+    expect(fetched.rows.length).toBe(1);
+    expect(fetched.rows[0].receipt_url).toBe(sampleReceipt);
+    expect(fetched.rows[0].receipt_name).toBe(sampleFilename);
+
+    // 3. Clean up
+    await query('DELETE FROM expenses WHERE id = $1', [item.id]);
+  });
 });
