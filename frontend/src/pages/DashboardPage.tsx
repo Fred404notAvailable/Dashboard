@@ -175,6 +175,8 @@ export default function DashboardPage() {
   const [forecastLoading, setForecastLoading] = useState(false);
   const [deptInsights, setDeptInsights] = useState<DeptInsightsData | null>(null);
   const [deptInsightsLoading, setDeptInsightsLoading] = useState(false);
+  const [deptFilterStatus, setDeptFilterStatus] = useState<'all' | 'critical' | 'opportunity' | 'on-track'>('all');
+  const [deptShowAll, setDeptShowAll] = useState(false);
 
   // Goal editing
   const [editingGoal, setEditingGoal] = useState(false);
@@ -1280,33 +1282,36 @@ export default function DashboardPage() {
             {/* ══ Department Focus Suggestions ══ */}
             {(user?.role === 'admin' || user?.role === 'overall' || user?.role === 'analyst') && (
               <div className="card animate-fade-in" style={{ marginBottom: '24px', border: '1px solid #2a2a3a' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                   <div>
                     <div className="section-title" style={{ margin: 0, fontSize: '1.1rem', color: '#A78BFA' }}>🎯 Department Focus Intelligence</div>
                     <p style={{ fontSize: '0.8rem', color: '#888', margin: '4px 0 0 0' }}>
-                      AI-scored departments ranked by registration urgency — based on count, trend, tier conversion &amp; event depth
+                      AI-scored departments ranked by registration urgency — identifying low-turnout lagging departments and prime upsell opportunities
                     </p>
                   </div>
                   <button
                     onClick={fetchDeptInsights}
                     disabled={deptInsightsLoading}
-                    style={{ padding: '6px 14px', fontSize: '0.75rem', background: '#1E1A2E', border: '1px solid #A78BFA60', borderRadius: '6px', color: '#A78BFA', cursor: 'pointer' }}
+                    style={{ padding: '6px 14px', fontSize: '0.75rem', background: '#1E1A2E', border: '1px solid #A78BFA60', borderRadius: '6px', color: '#A78BFA', cursor: 'pointer', transition: 'all 0.2s' }}
                   >
-                    {deptInsightsLoading ? '⏳' : '↺ Refresh'}
+                    {deptInsightsLoading ? '⏳ Refreshing...' : '↺ Refresh Analysis'}
                   </button>
                 </div>
 
                 {deptInsightsLoading && (
-                  <div style={{ padding: '24px', textAlign: 'center', color: '#888' }}>Analysing departments...</div>
+                  <div style={{ padding: '28px', textAlign: 'center', color: '#888' }}>
+                    <div style={{ fontSize: '1.5rem', marginBottom: '8px' }}>⏳</div>
+                    Analysing department registration velocities &amp; conversion rates...
+                  </div>
                 )}
 
                 {!deptInsightsLoading && deptInsights && (() => {
-                  const all = deptInsights.insights;
+                  const all = deptInsights.insights || [];
                   if (all.length === 0) return <p style={{ color: '#666', fontSize: '0.85rem' }}>No department data available for this period.</p>;
 
-                  const critical    = all.filter(d => d.status === 'critical').slice(0, 3);
-                  const opportunity = all.filter(d => d.status === 'opportunity').slice(0, 3);
-                  const onTrack     = all.filter(d => d.status === 'on-track').slice(0, 3);
+                  const critical    = all.filter(d => d.status === 'critical');
+                  const opportunity = all.filter(d => d.status === 'opportunity');
+                  const onTrack     = all.filter(d => d.status === 'on-track');
 
                   const statusStyles: Record<string, { bg: string; border: string; badge: string; icon: string }> = {
                     critical:    { bg: '#1A0A0A', border: '#7f1d1d', badge: '#EF4444', icon: '🔴' },
@@ -1315,41 +1320,71 @@ export default function DashboardPage() {
                   };
 
                   const DeptCard = ({ dept }: { dept: DeptInsight }) => {
-                    const s = statusStyles[dept.status];
+                    const s = statusStyles[dept.status] || statusStyles['on-track'];
                     return (
-                      <div style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: '10px', padding: '14px 16px', cursor: 'pointer' }}
-                        onClick={() => handleDrillDept(dept.department)}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                          <div>
-                            <span style={{ fontSize: '0.7rem', color: s.badge, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                              {s.icon} {dept.status.replace('-', ' ')}
+                      <div
+                        style={{
+                          background: s.bg,
+                          border: `1px solid ${s.border}`,
+                          borderRadius: '10px',
+                          padding: '14px 16px',
+                          cursor: 'pointer',
+                          transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                        }}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                          e.currentTarget.style.boxShadow = `0 6px 16px ${s.border}40`;
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                        onClick={() => handleDrillDept(dept.department)}
+                        title={`Click to filter dashboard to ${dept.department}`}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                            <div>
+                              <span style={{ fontSize: '0.7rem', color: s.badge, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                                {s.icon} {dept.status.replace('-', ' ')}
+                              </span>
+                              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#E0E0E0', marginTop: '2px' }}>{dept.department}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '1.3rem', fontWeight: 700, color: s.badge }}>{dept.focusScore ?? 0}</div>
+                              <div style={{ fontSize: '0.65rem', color: '#666' }}>focus score</div>
+                            </div>
+                          </div>
+
+                          {/* Stats row */}
+                          <div style={{ display: 'flex', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>📋 <strong>{dept.total ?? 0}</strong> regs</span>
+                            <span style={{ fontSize: '0.75rem', color: (dept.trend ?? 0) >= 0 ? '#22C55E' : '#EF4444' }}>
+                              {(dept.trend ?? 0) >= 0 ? '↑' : '↓'} <strong>{Math.abs(dept.trend ?? 0)}%</strong> trend
                             </span>
-                            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#E0E0E0', marginTop: '2px' }}>{dept.department}</div>
+                            <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>⭐ <strong>{dept.tier250Rate ?? 0}%</strong> premium</span>
+                            <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>🎭 <strong>{dept.avgEvents ?? 0}</strong> events avg</span>
                           </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '1.3rem', fontWeight: 700, color: s.badge }}>{dept.focusScore}</div>
-                            <div style={{ fontSize: '0.65rem', color: '#666' }}>focus score</div>
+
+                          {/* Actionable recommendation */}
+                          <div style={{ fontSize: '0.74rem', color: '#A0A0A0', borderTop: `1px solid ${s.border}40`, paddingTop: '8px', lineHeight: '1.4' }}>
+                            {dept.reason}
                           </div>
                         </div>
 
-                        {/* Stats row */}
-                        <div style={{ display: 'flex', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>📋 <strong>{dept.total}</strong> regs</span>
-                          <span style={{ fontSize: '0.75rem', color: dept.trend >= 0 ? '#22C55E' : '#EF4444' }}>
-                            {dept.trend >= 0 ? '↑' : '↓'} <strong>{Math.abs(dept.trend)}%</strong> trend
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>⭐ <strong>{dept.tier250Rate}%</strong> premium</span>
-                          <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>🎭 <strong>{dept.avgEvents}</strong> events avg</span>
-                        </div>
+                        <div>
+                          {/* Focus score bar */}
+                          <div style={{ marginTop: '10px', height: '4px', background: '#222', borderRadius: '2px', overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.min(100, dept.focusScore ?? 0)}%`, height: '100%', background: s.badge, borderRadius: '2px', transition: 'width 0.5s ease' }} />
+                          </div>
 
-                        {/* Reason */}
-                        <div style={{ fontSize: '0.73rem', color: '#888', borderTop: `1px solid ${s.border}40`, paddingTop: '8px', lineHeight: '1.4' }}>
-                          {dept.reason}
-                        </div>
-
-                        {/* Focus score bar */}
-                        <div style={{ marginTop: '8px', height: '3px', background: '#222', borderRadius: '2px' }}>
-                          <div style={{ width: `${dept.focusScore}%`, height: '100%', background: s.badge, borderRadius: '2px', transition: 'width 0.5s ease' }} />
+                          {/* Interactive cue */}
+                          <div style={{ marginTop: '6px', fontSize: '0.68rem', color: '#666', textAlign: 'right' }}>
+                            Filter dashboard to {dept.department} →
+                          </div>
                         </div>
                       </div>
                     );
@@ -1357,43 +1392,174 @@ export default function DashboardPage() {
 
                   return (
                     <>
-                      {/* Global stats strip */}
-                      <div style={{ display: 'flex', gap: '20px', marginBottom: '16px', padding: '10px 14px', background: '#141414', borderRadius: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.78rem', color: '#888' }}>📊 <strong style={{ color: '#C0C0C0' }}>{all.length}</strong> departments tracked</span>
-                        <span style={{ fontSize: '0.78rem', color: '#888' }}>⭐ Avg premium tier: <strong style={{ color: '#F59E0B' }}>{deptInsights.globalAvgTier250Rate}%</strong></span>
-                        <span style={{ fontSize: '0.78rem', color: '#888' }}>🎭 Avg events/reg: <strong style={{ color: '#A78BFA' }}>{deptInsights.globalAvgEvents}</strong></span>
-                        <span style={{ fontSize: '0.78rem', color: '#888' }}>📋 Avg regs/dept: <strong style={{ color: '#60A5FA' }}>{deptInsights.avgCountPerDept}</strong></span>
+                      {/* Interactive Filter Pills & Global Summary */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+                        {/* Filter Tabs */}
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => setDeptFilterStatus('all')}
+                            style={{
+                              padding: '5px 12px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              borderRadius: '20px',
+                              border: '1px solid ' + (deptFilterStatus === 'all' ? '#A78BFA' : '#333'),
+                              background: deptFilterStatus === 'all' ? '#2E1A47' : '#141414',
+                              color: deptFilterStatus === 'all' ? '#C4B5FD' : '#888',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            All ({all.length})
+                          </button>
+                          <button
+                            onClick={() => setDeptFilterStatus('critical')}
+                            style={{
+                              padding: '5px 12px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              borderRadius: '20px',
+                              border: '1px solid ' + (deptFilterStatus === 'critical' ? '#EF4444' : '#333'),
+                              background: deptFilterStatus === 'critical' ? '#2E0E0E' : '#141414',
+                              color: deptFilterStatus === 'critical' ? '#FCA5A5' : '#888',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            🔴 Critical ({critical.length})
+                          </button>
+                          <button
+                            onClick={() => setDeptFilterStatus('opportunity')}
+                            style={{
+                              padding: '5px 12px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              borderRadius: '20px',
+                              border: '1px solid ' + (deptFilterStatus === 'opportunity' ? '#F59E0B' : '#333'),
+                              background: deptFilterStatus === 'opportunity' ? '#2B1D05' : '#141414',
+                              color: deptFilterStatus === 'opportunity' ? '#FDE68A' : '#888',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            🟡 Opportunity ({opportunity.length})
+                          </button>
+                          <button
+                            onClick={() => setDeptFilterStatus('on-track')}
+                            style={{
+                              padding: '5px 12px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              borderRadius: '20px',
+                              border: '1px solid ' + (deptFilterStatus === 'on-track' ? '#22C55E' : '#333'),
+                              background: deptFilterStatus === 'on-track' ? '#092911' : '#141414',
+                              color: deptFilterStatus === 'on-track' ? '#86EFAC' : '#888',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            🟢 On Track ({onTrack.length})
+                          </button>
+                        </div>
+
+                        {/* Summary Metrics */}
+                        <div style={{ display: 'flex', gap: '16px', padding: '6px 14px', background: '#141414', borderRadius: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.78rem', color: '#888' }}>⭐ Avg premium tier: <strong style={{ color: '#F59E0B' }}>{deptInsights.globalAvgTier250Rate ?? 0}%</strong></span>
+                          <span style={{ fontSize: '0.78rem', color: '#888' }}>🎭 Avg events/reg: <strong style={{ color: '#A78BFA' }}>{deptInsights.globalAvgEvents ?? 0}</strong></span>
+                          <span style={{ fontSize: '0.78rem', color: '#888' }}>📋 Avg regs/dept: <strong style={{ color: '#60A5FA' }}>{deptInsights.avgCountPerDept ?? 0}</strong></span>
+                        </div>
                       </div>
 
-                      {critical.length > 0 && (
+                      {/* Display by Active Filter */}
+                      {deptFilterStatus === 'all' && (
+                        <>
+                          {critical.length > 0 && (
+                            <div style={{ marginBottom: '18px' }}>
+                              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#EF4444', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                                🔴 CRITICAL — URGENT FOCUS NEEDED ({critical.length} DEPARTMENTS)
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '10px' }}>
+                                {(deptShowAll ? critical : critical.slice(0, 3)).map(d => <DeptCard key={d.department} dept={d} />)}
+                              </div>
+                            </div>
+                          )}
+
+                          {opportunity.length > 0 && (
+                            <div style={{ marginBottom: '18px' }}>
+                              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#F59E0B', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                                🟡 OPPORTUNITY — GROWTH &amp; UPSELL TARGETS ({opportunity.length} DEPARTMENTS)
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '10px' }}>
+                                {(deptShowAll ? opportunity : opportunity.slice(0, 3)).map(d => <DeptCard key={d.department} dept={d} />)}
+                              </div>
+                            </div>
+                          )}
+
+                          {onTrack.length > 0 && (
+                            <div style={{ marginBottom: '14px' }}>
+                              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#22C55E', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                                🟢 ON TRACK — PERFORMING WELL ({onTrack.length} DEPARTMENTS)
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '10px' }}>
+                                {(deptShowAll ? onTrack : onTrack.slice(0, 3)).map(d => <DeptCard key={d.department} dept={d} />)}
+                              </div>
+                            </div>
+                          )}
+
+                          {all.length > 6 && (
+                            <div style={{ textAlign: 'center', marginTop: '12px', marginBottom: '8px' }}>
+                              <button
+                                onClick={() => setDeptShowAll(!deptShowAll)}
+                                style={{
+                                  padding: '6px 18px',
+                                  fontSize: '0.78rem',
+                                  background: '#1A1A24',
+                                  border: '1px solid #333',
+                                  borderRadius: '6px',
+                                  color: '#A78BFA',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {deptShowAll
+                                  ? '▲ Show top 3 per tier'
+                                  : `▼ Show all ${all.length} departments (${critical.length} critical, ${opportunity.length} opportunity, ${onTrack.length} on-track)`}
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {deptFilterStatus === 'critical' && (
                         <div style={{ marginBottom: '16px' }}>
-                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#EF4444', letterSpacing: '0.08em', marginBottom: '8px' }}>🔴 CRITICAL — IMMEDIATE FOCUS NEEDED</div>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#EF4444', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                            🔴 CRITICAL — {critical.length} DEPARTMENTS NEEDING IMMEDIATE PROMOTIONAL OUTREACH
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '10px' }}>
                             {critical.map(d => <DeptCard key={d.department} dept={d} />)}
                           </div>
                         </div>
                       )}
 
-                      {opportunity.length > 0 && (
+                      {deptFilterStatus === 'opportunity' && (
                         <div style={{ marginBottom: '16px' }}>
-                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#F59E0B', letterSpacing: '0.08em', marginBottom: '8px' }}>🟡 OPPORTUNITY — GROWTH POTENTIAL</div>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#F59E0B', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                            🟡 OPPORTUNITY — {opportunity.length} DEPARTMENTS WITH GROWTH OR UPSELL POTENTIAL
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '10px' }}>
                             {opportunity.map(d => <DeptCard key={d.department} dept={d} />)}
                           </div>
                         </div>
                       )}
 
-                      {onTrack.length > 0 && (
-                        <div>
-                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#22C55E', letterSpacing: '0.08em', marginBottom: '8px' }}>🟢 ON TRACK — PERFORMING WELL</div>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+                      {deptFilterStatus === 'on-track' && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#22C55E', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                            🟢 ON TRACK — {onTrack.length} TOP PERFORMING DEPARTMENTS
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '10px' }}>
                             {onTrack.map(d => <DeptCard key={d.department} dept={d} />)}
                           </div>
                         </div>
                       )}
 
-                      <div style={{ marginTop: '14px', padding: '8px 12px', background: '#1A1A1A', borderRadius: '6px', fontSize: '0.72rem', color: '#555', borderLeft: '3px solid #A78BFA' }}>
-                        💡 <strong style={{ color: '#888' }}>Scoring signals:</strong> Count share (40%) · Trend momentum (25%) · Premium tier conversion (20%) · Event participation depth (15%). Click any card to filter the dashboard to that department.
+                      <div style={{ marginTop: '14px', padding: '10px 14px', background: '#1A1A1A', borderRadius: '6px', fontSize: '0.72rem', color: '#666', borderLeft: '3px solid #A78BFA', lineHeight: '1.5' }}>
+                        💡 <strong style={{ color: '#888' }}>How scoring works:</strong> Registration count vs campus average (40%) · Registration velocity &amp; trend (25%) · ₹250 Premium tier conversion (20%) · Multi-event participation (15%). Click any department card to filter the entire dashboard to that department.
                       </div>
                     </>
                   );

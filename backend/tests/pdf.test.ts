@@ -16,7 +16,7 @@ describe('PDF Dynamic Timeframe Reports', () => {
       method: 'POST',
       url: '/api/auth/login',
       payload: {
-        email: 'overall@facpyros.in',
+        email: 'admin@facpyros.in',
         password: 'admin123',
       },
     });

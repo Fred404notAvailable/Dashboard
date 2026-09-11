@@ -538,54 +538,78 @@ export async function reportRoutes(app: FastifyInstance) {
 
         // ── 3. Global averages for normalisation ──
         const allRows = currentResult.rows;
-        const totalRegistrations = allRows.reduce((s: number, r: any) => s + parseInt(r.total, 10), 0);
-        const globalTier250Rate  = allRows.reduce((s: number, r: any) => s + parseInt(r.tier250, 10), 0) / Math.max(1, totalRegistrations) * 100;
+        const totalRegistrations = allRows.reduce((s: number, r: any) => s + parseInt(r.total || '0', 10), 0);
+        const globalTier250Rate  = allRows.reduce((s: number, r: any) => s + parseInt(r.tier250 || '0', 10), 0) / Math.max(1, totalRegistrations) * 100;
         const globalAvgEvents    = allRows.reduce((s: number, r: any) => s + parseFloat(r.avg_events || '0'), 0) / Math.max(1, allRows.length);
         const avgCountPerDept    = totalRegistrations / Math.max(1, allRows.length);
 
         // ── 4. Score each department ──
         const insights = allRows.map((r: any) => {
-          const dept    = r.department as string;
-          const total   = parseInt(r.total, 10);
-          const tier250 = parseInt(r.tier250, 10);
+          const dept    = (r.department || 'Unknown') as string;
+          const total   = parseInt(r.total || '0', 10);
+          const tier250 = parseInt(r.tier250 || '0', 10);
           const avgEvt  = parseFloat(r.avg_events || '0');
 
           const recent = recentMap.get(dept) ?? 0;
           const prior  = priorMap.get(dept) ?? 0;
-          const trend  = prior > 0 ? Math.round(((recent - prior) / prior) * 100) : (recent > 0 ? 100 : 0);
+          
+          // Realistic trend calculation: only calculate high % if there's meaningful volume
+          let trend: number;
+          if (prior > 0) {
+            trend = Math.round(((recent - prior) / prior) * 100);
+          } else if (recent > 2) {
+            trend = 100;
+          } else if (recent > 0) {
+            trend = recent * 25; // small trace volume (1-2 regs) is not 100% breakout momentum
+          } else {
+            trend = 0;
+          }
 
           const tier250Rate = total > 0 ? Math.round((tier250 / total) * 100) : 0;
 
-          // Signal scores (0–100 each, higher = more focus needed)
-          const countScore  = Math.max(0, Math.min(100, Math.round((1 - total / (avgCountPerDept * 2)) * 100)));
-          const trendScore  = trend >= 0 ? 0 : Math.min(100, Math.abs(trend));
+          // Severity markers
+          const isCriticallyLow = total <= Math.max(3, Math.round(avgCountPerDept * 0.25));
+          const isBelowAverage = total < avgCountPerDept;
+          const isLowPremium = tier250Rate < (globalTier250Rate - 10);
+
+          // Signal scores (0–100 each, higher = more focus / urgency needed)
+          const countScore  = isCriticallyLow
+            ? Math.max(85, Math.min(100, Math.round((1 - total / (avgCountPerDept * 2)) * 100)))
+            : Math.max(0, Math.min(100, Math.round((1 - total / (avgCountPerDept * 2)) * 100)));
+          const trendScore  = total <= 3 ? 40 : (trend >= 0 ? 0 : Math.min(100, Math.abs(trend)));
           const tierScore   = Math.max(0, Math.min(100, Math.round((globalTier250Rate - tier250Rate) * 2)));
           const eventScore  = Math.max(0, Math.min(100, Math.round((globalAvgEvents - avgEvt) * 33)));
 
-          // Weighted composite focus score
-          const focusScore = Math.round(
+          // Weighted composite focus score (0-100)
+          const focusScore = Math.max(0, Math.min(100, Math.round(
             countScore * 0.40 +
             trendScore * 0.25 +
             tierScore  * 0.20 +
             eventScore * 0.15
-          );
+          )));
 
-          // Status classification
+          // Status classification & actionable plain-English recommendations
           let status: 'critical' | 'opportunity' | 'on-track';
           let reason: string;
-          if (focusScore >= 60 || (trend <= -20 && total < avgCountPerDept)) {
+
+          if (isCriticallyLow || (trend <= -20 && isBelowAverage) || focusScore >= 50) {
             status = 'critical';
-            reason = trend < 0
-              ? `Declining trend (${trend}%) with below-average registration count`
-              : `Significantly below-average registration count (${total} vs avg ${Math.round(avgCountPerDept)})`;
-          } else if (focusScore >= 30 || tier250Rate < globalTier250Rate - 10) {
+            reason = isCriticallyLow
+              ? `Critically low turnout (${total} vs ${Math.round(avgCountPerDept)} dept avg) — deploy student reps for direct classroom outreach`
+              : trend < 0
+              ? `Sharp registration decline (${trend}% trend) with below-average total (${total})`
+              : `High urgency score (${focusScore}/100) — requires immediate promotional focus`;
+          } else if (isLowPremium && total >= 15) {
             status = 'opportunity';
-            reason = tier250Rate < globalTier250Rate - 10
-              ? `Low premium-tier conversion (${tier250Rate}% vs avg ${Math.round(globalTier250Rate)}%) — potential upsell opportunity`
-              : `Moderate engagement — could grow with targeted outreach`;
+            reason = `High turnout (${total} regs) but only ${tier250Rate}% on ₹250 tier (${tier250} regs) — prime target for all-access event upsell`;
+          } else if (focusScore >= 25 || isBelowAverage || isLowPremium) {
+            status = 'opportunity';
+            reason = isBelowAverage
+              ? `Moderate turnout (${total} of ${Math.round(avgCountPerDept)} avg) — potential to double with departmental announcements`
+              : `Steady participation (${total} regs) — targeted messaging can push engagement higher`;
           } else {
             status = 'on-track';
-            reason = `Strong registration momentum${trend > 0 ? ` (+${trend}% trend)` : ''} — keep it up`;
+            reason = `Top performer (${total} regs, ${tier250Rate}% premium) — strong momentum; leverage as benchmark model`;
           }
 
           return {
@@ -613,9 +637,9 @@ export async function reportRoutes(app: FastifyInstance) {
         return {
           success: true,
           dateRange,
-          globalAvgTier250Rate: Math.round(globalTier250Rate),
-          globalAvgEvents: Math.round(globalAvgEvents * 10) / 10,
-          avgCountPerDept: Math.round(avgCountPerDept),
+          globalAvgTier250Rate: Math.round(globalTier250Rate || 0),
+          globalAvgEvents: Math.round((globalAvgEvents || 0) * 10) / 10,
+          avgCountPerDept: Math.round(avgCountPerDept || 0),
           insights,
         };
       }, 300);

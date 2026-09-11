@@ -1,7 +1,30 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { query } from '../src/database/db.js';
+import { MOCK_EXPENSES } from '../src/database/mockData.js';
 
 describe('Expenses Database and Calculations', () => {
+  let testUserId: string | null = null;
+
+  beforeAll(async () => {
+    // Find an existing user or fallback to null
+    const userRes = await query<{ id: string }>('SELECT id FROM users LIMIT 1');
+    if (userRes.rows.length > 0) {
+      testUserId = userRes.rows[0].id;
+    }
+
+    // Seed mock expenses if table is empty in PostgreSQL
+    const existing = await query('SELECT COUNT(*) as count FROM expenses');
+    if (parseInt(existing.rows[0]?.count || '0', 10) === 0) {
+      for (const e of MOCK_EXPENSES) {
+        await query(
+          `INSERT INTO expenses (title, category, amount, expense_date, payment_method, vendor, notes, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [e.title, e.category, e.amount, e.expense_date, e.payment_method, e.vendor, e.notes, testUserId]
+        );
+      }
+    }
+  });
+
   it('should query seeded mock expenses', async () => {
     const result = await query<{ id: string; title: string; amount: number; category: string }>(
       'SELECT * FROM expenses ORDER BY expense_date DESC'
@@ -37,7 +60,7 @@ describe('Expenses Database and Calculations', () => {
       `INSERT INTO expenses (title, category, amount, expense_date, payment_method, vendor, notes, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      ['Test Backdrop Banner', 'Venue & Stage', 4500, '2026-09-08', 'GPAY', 'PrintCity', 'Stage backdrop', 'overall-user-id']
+      ['Test Backdrop Banner', 'Venue & Stage', 4500, '2026-09-08', 'GPAY', 'PrintCity', 'Stage backdrop', testUserId]
     );
     expect(insertRes.rows.length).toBe(1);
     const newId = insertRes.rows[0].id;
@@ -55,7 +78,7 @@ describe('Expenses Database and Calculations', () => {
     // 3. Update
     const updateRes = await query<{ title: string; amount: number }>(
       `UPDATE expenses 
-       SET title = $1, amount = $2, updated_at = NOW() 
+       SET title = $1, amount = $2 
        WHERE id = $3 
        RETURNING *`,
       ['Test Backdrop Banner Updated', 5000, newId]
@@ -89,7 +112,7 @@ describe('Expenses Database and Calculations', () => {
         'Final settlement invoice',
         sampleReceipt,
         sampleFilename,
-        'overall-user-id',
+        testUserId,
       ]
     );
     expect(insertRes.rows.length).toBe(1);
