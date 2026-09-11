@@ -2,21 +2,33 @@ import Redis from 'ioredis';
 import { config } from '../config.js';
 
 let redis: Redis | null = null;
+let redisDisabled = false;
+let redisWarned = false;
 
-function getRedis(): Redis {
+function getRedis(): Redis | null {
+  if (redisDisabled) return null;
   if (!redis) {
     redis = new Redis(config.redisUrl, {
       lazyConnect: true,
-      maxRetriesPerRequest: 2,
+      maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
+      retryStrategy: () => {
+        redisDisabled = true;
+        return null;
+      },
     });
 
     redis.on('error', (err) => {
-      // Don't crash — just log; caching is optional
-      console.warn('[redis] Connection error (cache disabled):', err.message);
+      if (!redisWarned) {
+        console.warn('[redis] Connection unavailable (caching disabled):', err.message);
+        redisWarned = true;
+      }
     });
 
-    redis.on('connect', () => console.log('[redis] Connected'));
+    redis.on('connect', () => {
+      redisDisabled = false;
+      console.log('[redis] Connected');
+    });
   }
   return redis;
 }
@@ -28,7 +40,9 @@ const DEFAULT_TTL_SECONDS = 300; // 5 minutes
  */
 export async function cacheGet<T>(key: string): Promise<T | null> {
   try {
-    const raw = await getRedis().get(key);
+    const client = getRedis();
+    if (!client) return null;
+    const raw = await client.get(key);
     if (!raw) return null;
     return JSON.parse(raw) as T;
   } catch {
@@ -41,7 +55,9 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
  */
 export async function cacheSet(key: string, value: unknown, ttlSeconds = DEFAULT_TTL_SECONDS): Promise<void> {
   try {
-    await getRedis().set(key, JSON.stringify(value), 'EX', ttlSeconds);
+    const client = getRedis();
+    if (!client) return;
+    await client.set(key, JSON.stringify(value), 'EX', ttlSeconds);
   } catch {
     // Cache failures are non-fatal
   }
