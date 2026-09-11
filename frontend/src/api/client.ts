@@ -71,6 +71,7 @@ export const reportsApi = {
   eventParticipants: (event: string, params: Record<string, string>) =>
     api.get('/api/reports/event-participants', { params: { event, ...params } }),
   forecast: (days = 14) => api.get('/api/forecast', { params: { days } }),
+  deptInsights: (params: Record<string, string>) => api.get('/api/reports/dept-insights', { params }),
 };
 
 export const syncApi = {

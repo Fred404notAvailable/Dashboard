@@ -69,9 +69,34 @@ interface ForecastData {
     currentTotal: number;
     goalTarget: number;
     projectedGoalDate: string | null;
+    daysUntilGoal: number | null;
     confidenceScore: number;
+    momentum: number;
+    peakDay: string | null;
+    slowestDay: string | null;
+    weeklyPattern: { day: string; avgCount: number; index: number }[];
+    modelBlend: { linear: number; ets: number; movingAvg: number };
   };
   horizonDays: number;
+}
+
+interface DeptInsight {
+  department: string;
+  total: number;
+  tier250: number;
+  tier250Rate: number;
+  avgEvents: number;
+  trend: number;
+  focusScore: number;
+  status: 'critical' | 'opportunity' | 'on-track';
+  reason: string;
+}
+
+interface DeptInsightsData {
+  insights: DeptInsight[];
+  globalAvgTier250Rate: number;
+  globalAvgEvents: number;
+  avgCountPerDept: number;
 }
 
 interface ExpenseItem {
@@ -148,6 +173,8 @@ export default function DashboardPage() {
   const [forecastHorizon, setForecastHorizon] = useState<number>(14);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
+  const [deptInsights, setDeptInsights] = useState<DeptInsightsData | null>(null);
+  const [deptInsightsLoading, setDeptInsightsLoading] = useState(false);
 
   // Goal editing
   const [editingGoal, setEditingGoal] = useState(false);
@@ -203,6 +230,18 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchDeptInsights = useCallback(async () => {
+    setDeptInsightsLoading(true);
+    try {
+      const res = await reportsApi.deptInsights(queryParams);
+      setDeptInsights(res.data);
+    } catch (err) {
+      console.error('Dept insights fetch failed:', err);
+    } finally {
+      setDeptInsightsLoading(false);
+    }
+  }, [queryParams]);
+
   const fetchExpenses = useCallback(async () => {
     if (!hasFinancialAccess) return;
     try {
@@ -245,8 +284,9 @@ export default function DashboardPage() {
   useEffect(() => {
     if (user?.role === 'admin' || user?.role === 'overall' || user?.role === 'analyst') {
       fetchForecast(forecastHorizon);
+      fetchDeptInsights();
     }
-  }, [forecastHorizon, fetchForecast, user]);
+  }, [forecastHorizon, fetchForecast, fetchDeptInsights, user]);
 
   const handlePreset = (preset: Preset) => {
     const dates = resolvePresetDates(preset);
@@ -1084,131 +1124,280 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Predictive Registration Forecast */}
+            {/* ══ Predictive Registration Forecast (Enhanced) ══ */}
             {(user?.role === 'admin' || user?.role === 'overall' || user?.role === 'analyst') && (
               <div className="card animate-fade-in" style={{ marginBottom: '24px', border: `1px solid ${GOLD}40` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+
+                {/* Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                   <div>
                     <div className="section-title" style={{ margin: 0, fontSize: '1.1rem', color: GOLD }}>
                       🔮 Predictive Registration Forecast
                     </div>
                     <p style={{ fontSize: '0.8rem', color: '#888', margin: '4px 0 0 0' }}>
-                      Statistical trend model with blended moving-average and 95% confidence intervals
+                      Blended ETS + Linear + Moving-Average model with day-of-week seasonality &amp; 95% CI
                     </p>
                   </div>
-
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>Horizon:</span>
-                    {[7, 14, 30].map(h => (
+                    {[7, 14, 30, 60].map(h => (
                       <button
                         key={h}
                         className={`preset-btn ${forecastHorizon === h ? 'preset-btn--active' : ''}`}
                         onClick={() => setForecastHorizon(h)}
                         style={{ padding: '4px 12px', fontSize: '0.75rem' }}
                       >
-                        {h} Days
+                        {h}d
                       </button>
                     ))}
                   </div>
                 </div>
 
                 {forecastLoading && (
-                  <div style={{ padding: '32px', textAlign: 'center', color: '#888' }}>Calculating forecast models...</div>
+                  <div style={{ padding: '32px', textAlign: 'center', color: '#888' }}>⚙️ Calculating forecast models...</div>
                 )}
 
-                {!forecastLoading && forecastData && (
-                  <>
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                      gap: '12px',
-                      marginBottom: '20px'
-                    }}>
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Projected Final Volume</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.4rem', color: GOLD }}>
-                          {forecastData.metrics.projectedTotal}
+                {!forecastLoading && forecastData && (() => {
+                  const m = forecastData.metrics;
+                  const momentumColor = m.momentum > 10 ? '#2ECC71' : m.momentum < -10 ? '#E74C3C' : '#E67E22';
+                  const momentumIcon  = m.momentum > 10 ? '↑' : m.momentum < -10 ? '↓' : '→';
+                  return (
+                    <>
+                      {/* ── KPI Row ── */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(155px, 1fr))', gap: '10px', marginBottom: '18px' }}>
+
+                        <div className="stat-card" style={{ padding: '12px 14px' }}>
+                          <div className="stat-card__label">Projected Total</div>
+                          <div className="stat-card__value" style={{ fontSize: '1.4rem', color: GOLD }}>{m.projectedTotal}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#888' }}>+{m.projectedTotal - m.currentTotal} expected in {forecastHorizon}d</div>
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          +{forecastData.metrics.projectedTotal - forecastData.metrics.currentTotal} expected
+
+                        <div className="stat-card" style={{ padding: '12px 14px' }}>
+                          <div className="stat-card__label">Daily Velocity</div>
+                          <div className="stat-card__value" style={{ fontSize: '1.4rem', color: '#2ECC71' }}>{m.averageDailyRate}<span style={{ fontSize: '0.8rem' }}>/day</span></div>
+                          <div style={{ fontSize: '0.72rem', color: '#888' }}>Slope: {m.trendSlope >= 0 ? '+' : ''}{m.trendSlope}</div>
                         </div>
+
+                        <div className="stat-card" style={{ padding: '12px 14px' }}>
+                          <div className="stat-card__label">Momentum</div>
+                          <div className="stat-card__value" style={{ fontSize: '1.4rem', color: momentumColor }}>
+                            {momentumIcon} {m.momentum >= 0 ? '+' : ''}{m.momentum}%
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#888' }}>Last 7d vs prior 7d avg</div>
+                        </div>
+
+                        <div className="stat-card" style={{ padding: '12px 14px' }}>
+                          <div className="stat-card__label">Days Until Goal</div>
+                          <div className="stat-card__value" style={{ fontSize: '1.3rem', color: '#3498DB' }}>
+                            {m.daysUntilGoal === 0 ? '🎉 Reached' : m.daysUntilGoal != null ? `${m.daysUntilGoal}d` : 'N/A'}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#888' }}>
+                            {m.projectedGoalDate && m.projectedGoalDate !== 'Goal Reached' ? `Est. ${m.projectedGoalDate}` : `Target: ${m.goalTarget}`}
+                          </div>
+                        </div>
+
+                        <div className="stat-card" style={{ padding: '12px 14px' }}>
+                          <div className="stat-card__label">Model Confidence</div>
+                          <div className="stat-card__value" style={{ fontSize: '1.4rem', color: '#E67E22' }}>{m.confidenceScore}%</div>
+                          <div style={{ fontSize: '0.72rem', color: '#888' }}>R²={m.rSquared} · L{Math.round(m.modelBlend.linear*100)}/ E{Math.round(m.modelBlend.ets*100)}/ M{Math.round(m.modelBlend.movingAvg*100)}</div>
+                        </div>
+
+                        {m.peakDay && (
+                          <div className="stat-card" style={{ padding: '12px 14px' }}>
+                            <div className="stat-card__label">Peak Day</div>
+                            <div className="stat-card__value" style={{ fontSize: '1.1rem', color: GOLD }}>📅 {m.peakDay}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#888' }}>Slowest: {m.slowestDay ?? '—'}</div>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Avg Daily Velocity</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.4rem', color: '#2ECC71' }}>
-                          {forecastData.metrics.averageDailyRate} <span style={{ fontSize: '0.8rem' }}>/ day</span>
+                      {/* ── Main Forecast Chart ── */}
+                      <ResponsiveContainer width="100%" height={270}>
+                        <AreaChart
+                          data={[
+                            ...forecastData.historical.map(h => ({ date: h.date, actual: h.count, predicted: null, lower: null, upper: null })),
+                            ...forecastData.forecast.map(f => ({ date: f.date, actual: null, predicted: f.predicted, lower: f.lower, upper: f.upper })),
+                          ]}
+                          margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+                        >
+                          <defs>
+                            <linearGradient id="goldGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={GOLD} stopOpacity={0.25} />
+                              <stop offset="95%" stopColor={GOLD} stopOpacity={0.02} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
+                          <XAxis dataKey="date" tick={{ fill: '#666', fontSize: 9 }} interval={Math.ceil((forecastData.historical.length + forecastHorizon) / 12)} />
+                          <YAxis tick={{ fill: '#666', fontSize: 10 }} />
+                          <Tooltip
+                            contentStyle={{ background: '#1A1A1A', border: `1px solid ${GOLD}80`, borderRadius: '8px', color: '#F5F5F5', fontSize: '0.8rem' }}
+                            formatter={(value: any, name: string) => [
+                              value === null ? '—' : value,
+                              name === 'upper' ? '95% Upper' : name === 'lower' ? '95% Lower' : name
+                            ]}
+                          />
+                          <Legend wrapperStyle={{ fontSize: '0.75rem' }} />
+                          <Area type="monotone" dataKey="upper" name="Upper 95%" stroke="none" fill={GOLD} fillOpacity={0.12} />
+                          <Area type="monotone" dataKey="lower" name="Lower 95%" stroke="none" fill="#1A1A1A" fillOpacity={0.9} />
+                          <Area type="monotone" dataKey="actual" name="Actual" stroke={GREEN} strokeWidth={2} fill="url(#goldGrad)" dot={{ r: 2, fill: GREEN }} />
+                          <Line type="monotone" dataKey="predicted" name="Forecast" stroke={GOLD} strokeWidth={2} strokeDasharray="6 3" dot={{ r: 2, fill: GOLD }} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+
+                      {/* ── Weekly Pattern Mini-Chart ── */}
+                      {m.weeklyPattern && m.weeklyPattern.some(p => p.avgCount > 0) && (
+                        <div style={{ marginTop: '18px' }}>
+                          <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: '8px', fontWeight: 600, letterSpacing: '0.05em' }}>📊 DAY-OF-WEEK PATTERN</div>
+                          <ResponsiveContainer width="100%" height={80}>
+                            <BarChart data={m.weeklyPattern} margin={{ top: 0, right: 0, left: -28, bottom: 0 }}>
+                              <XAxis dataKey="day" tick={{ fill: '#777', fontSize: 10 }} axisLine={false} tickLine={false} />
+                              <YAxis hide />
+                              <Tooltip
+                                contentStyle={{ background: '#1A1A1A', border: `1px solid ${GOLD}60`, borderRadius: '6px', color: '#F5F5F5', fontSize: '0.75rem' }}
+                                formatter={(v: any) => [`${v} avg/day`]}
+                              />
+                              <Bar dataKey="avgCount" name="Avg registrations" radius={[3, 3, 0, 0]}>
+                                {m.weeklyPattern.map((entry, i) => (
+                                  <Cell key={i} fill={entry.index === Math.max(...m.weeklyPattern.map(p => p.index)) ? GOLD : '#2a4a6a'} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          Trend slope: {forecastData.metrics.trendSlope >= 0 ? '+' : ''}{forecastData.metrics.trendSlope}
-                        </div>
+                      )}
+
+                      {/* ── Info footer ── */}
+                      <div style={{ marginTop: '12px', padding: '8px 12px', background: '#1C1C1C', borderRadius: '6px', fontSize: '0.73rem', color: '#666', borderLeft: `3px solid ${GOLD}` }}>
+                        💡 <strong style={{ color: '#999' }}>Model:</strong> Blended ETS ({Math.round(m.modelBlend.ets*100)}%) + Linear ({Math.round(m.modelBlend.linear*100)}%) + Moving Avg ({Math.round(m.modelBlend.movingAvg*100)}%) with day-of-week seasonal correction.
+                        Confidence intervals widen with forecast distance. Peak registrations historically on <strong style={{ color: GOLD }}>{m.peakDay ?? '—'}</strong>.
                       </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Goal Completion Date</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.2rem', color: '#3498DB' }}>
-                          {forecastData.metrics.projectedGoalDate || 'N/A'}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          Target: {forecastData.metrics.goalTarget} registrations
-                        </div>
-                      </div>
+            {/* ══ Department Focus Suggestions ══ */}
+            {(user?.role === 'admin' || user?.role === 'overall' || user?.role === 'analyst') && (
+              <div className="card animate-fade-in" style={{ marginBottom: '24px', border: '1px solid #2a2a3a' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <div>
+                    <div className="section-title" style={{ margin: 0, fontSize: '1.1rem', color: '#A78BFA' }}>🎯 Department Focus Intelligence</div>
+                    <p style={{ fontSize: '0.8rem', color: '#888', margin: '4px 0 0 0' }}>
+                      AI-scored departments ranked by registration urgency — based on count, trend, tier conversion &amp; event depth
+                    </p>
+                  </div>
+                  <button
+                    onClick={fetchDeptInsights}
+                    disabled={deptInsightsLoading}
+                    style={{ padding: '6px 14px', fontSize: '0.75rem', background: '#1E1A2E', border: '1px solid #A78BFA60', borderRadius: '6px', color: '#A78BFA', cursor: 'pointer' }}
+                  >
+                    {deptInsightsLoading ? '⏳' : '↺ Refresh'}
+                  </button>
+                </div>
 
-                      <div className="stat-card" style={{ padding: '12px 16px' }}>
-                        <div className="stat-card__label">Model Confidence</div>
-                        <div className="stat-card__value" style={{ fontSize: '1.4rem', color: '#E67E22' }}>
-                          {forecastData.metrics.confidenceScore}%
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#888' }}>
-                          R² goodness-of-fit: {forecastData.metrics.rSquared}
-                        </div>
-                      </div>
-                    </div>
-
-                    <ResponsiveContainer width="100%" height={260}>
-                      <AreaChart
-                        data={[
-                          ...forecastData.historical.map(h => ({
-                            date: h.date,
-                            actual: h.count,
-                            predicted: null,
-                            lower: null,
-                            upper: null,
-                          })),
-                          ...forecastData.forecast.map(f => ({
-                            date: f.date,
-                            actual: null,
-                            predicted: f.predicted,
-                            lower: f.lower,
-                            upper: f.upper,
-                          })),
-                        ]}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                        <XAxis dataKey="date" tick={{ fill: '#808080', fontSize: 10 }} />
-                        <YAxis tick={{ fill: '#808080', fontSize: 11 }} />
-                        <Tooltip contentStyle={{ background: '#1E1E1E', border: `1px solid ${GOLD}`, borderRadius: '8px', color: '#F5F5F5' }} />
-                        <Legend />
-                        <Area type="monotone" dataKey="upper" name="Upper 95% Bound" stroke="none" fill="#D4A843" fillOpacity={0.15} />
-                        <Area type="monotone" dataKey="lower" name="Lower 95% Bound" stroke="none" fill="#1E1E1E" fillOpacity={0.8} />
-                        <Line type="monotone" dataKey="actual" name="Historical Actual" stroke="#2ECC71" strokeWidth={2} dot={{ r: 3 }} />
-                        <Line type="monotone" dataKey="predicted" name="Predicted Trend" stroke={GOLD} strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3 }} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-
-                    <div style={{
-                      marginTop: '12px',
-                      padding: '8px 12px',
-                      background: '#242424',
-                      borderRadius: '6px',
-                      fontSize: '0.75rem',
-                      color: '#888',
-                      borderLeft: `3px solid ${GOLD}`
-                    }}>
-                      💡 <strong>Statistical Projection Note:</strong> Estimates use past registration velocity and Ordinary Least Squares trend fitting with a 95% confidence band. Spikes around campaign deadlines or on-spot registrations may cause actual numbers to deviate.
-                    </div>
-                  </>
+                {deptInsightsLoading && (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#888' }}>Analysing departments...</div>
                 )}
+
+                {!deptInsightsLoading && deptInsights && (() => {
+                  const all = deptInsights.insights;
+                  if (all.length === 0) return <p style={{ color: '#666', fontSize: '0.85rem' }}>No department data available for this period.</p>;
+
+                  const critical    = all.filter(d => d.status === 'critical').slice(0, 3);
+                  const opportunity = all.filter(d => d.status === 'opportunity').slice(0, 3);
+                  const onTrack     = all.filter(d => d.status === 'on-track').slice(0, 3);
+
+                  const statusStyles: Record<string, { bg: string; border: string; badge: string; icon: string }> = {
+                    critical:    { bg: '#1A0A0A', border: '#7f1d1d', badge: '#EF4444', icon: '🔴' },
+                    opportunity: { bg: '#1A1400', border: '#78350f', badge: '#F59E0B', icon: '🟡' },
+                    'on-track':  { bg: '#0A1A0A', border: '#14532d', badge: '#22C55E', icon: '🟢' },
+                  };
+
+                  const DeptCard = ({ dept }: { dept: DeptInsight }) => {
+                    const s = statusStyles[dept.status];
+                    return (
+                      <div style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: '10px', padding: '14px 16px', cursor: 'pointer' }}
+                        onClick={() => handleDrillDept(dept.department)}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                          <div>
+                            <span style={{ fontSize: '0.7rem', color: s.badge, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                              {s.icon} {dept.status.replace('-', ' ')}
+                            </span>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#E0E0E0', marginTop: '2px' }}>{dept.department}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '1.3rem', fontWeight: 700, color: s.badge }}>{dept.focusScore}</div>
+                            <div style={{ fontSize: '0.65rem', color: '#666' }}>focus score</div>
+                          </div>
+                        </div>
+
+                        {/* Stats row */}
+                        <div style={{ display: 'flex', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>📋 <strong>{dept.total}</strong> regs</span>
+                          <span style={{ fontSize: '0.75rem', color: dept.trend >= 0 ? '#22C55E' : '#EF4444' }}>
+                            {dept.trend >= 0 ? '↑' : '↓'} <strong>{Math.abs(dept.trend)}%</strong> trend
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>⭐ <strong>{dept.tier250Rate}%</strong> premium</span>
+                          <span style={{ fontSize: '0.75rem', color: '#B0B0B0' }}>🎭 <strong>{dept.avgEvents}</strong> events avg</span>
+                        </div>
+
+                        {/* Reason */}
+                        <div style={{ fontSize: '0.73rem', color: '#888', borderTop: `1px solid ${s.border}40`, paddingTop: '8px', lineHeight: '1.4' }}>
+                          {dept.reason}
+                        </div>
+
+                        {/* Focus score bar */}
+                        <div style={{ marginTop: '8px', height: '3px', background: '#222', borderRadius: '2px' }}>
+                          <div style={{ width: `${dept.focusScore}%`, height: '100%', background: s.badge, borderRadius: '2px', transition: 'width 0.5s ease' }} />
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <>
+                      {/* Global stats strip */}
+                      <div style={{ display: 'flex', gap: '20px', marginBottom: '16px', padding: '10px 14px', background: '#141414', borderRadius: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.78rem', color: '#888' }}>📊 <strong style={{ color: '#C0C0C0' }}>{all.length}</strong> departments tracked</span>
+                        <span style={{ fontSize: '0.78rem', color: '#888' }}>⭐ Avg premium tier: <strong style={{ color: '#F59E0B' }}>{deptInsights.globalAvgTier250Rate}%</strong></span>
+                        <span style={{ fontSize: '0.78rem', color: '#888' }}>🎭 Avg events/reg: <strong style={{ color: '#A78BFA' }}>{deptInsights.globalAvgEvents}</strong></span>
+                        <span style={{ fontSize: '0.78rem', color: '#888' }}>📋 Avg regs/dept: <strong style={{ color: '#60A5FA' }}>{deptInsights.avgCountPerDept}</strong></span>
+                      </div>
+
+                      {critical.length > 0 && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#EF4444', letterSpacing: '0.08em', marginBottom: '8px' }}>🔴 CRITICAL — IMMEDIATE FOCUS NEEDED</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+                            {critical.map(d => <DeptCard key={d.department} dept={d} />)}
+                          </div>
+                        </div>
+                      )}
+
+                      {opportunity.length > 0 && (
+                        <div style={{ marginBottom: '16px' }}>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#F59E0B', letterSpacing: '0.08em', marginBottom: '8px' }}>🟡 OPPORTUNITY — GROWTH POTENTIAL</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+                            {opportunity.map(d => <DeptCard key={d.department} dept={d} />)}
+                          </div>
+                        </div>
+                      )}
+
+                      {onTrack.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#22C55E', letterSpacing: '0.08em', marginBottom: '8px' }}>🟢 ON TRACK — PERFORMING WELL</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '10px' }}>
+                            {onTrack.map(d => <DeptCard key={d.department} dept={d} />)}
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: '14px', padding: '8px 12px', background: '#1A1A1A', borderRadius: '6px', fontSize: '0.72rem', color: '#555', borderLeft: '3px solid #A78BFA' }}>
+                        💡 <strong style={{ color: '#888' }}>Scoring signals:</strong> Count share (40%) · Trend momentum (25%) · Premium tier conversion (20%) · Event participation depth (15%). Click any card to filter the dashboard to that department.
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
           </>

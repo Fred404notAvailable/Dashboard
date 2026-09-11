@@ -464,4 +464,161 @@ export async function reportRoutes(app: FastifyInstance) {
       })),
     };
   });
+
+  // ── GET /api/reports/dept-insights ───────────────────────────────────────
+  // Returns a focus-score for every department — surfacing which need attention.
+  // Signals: count share, recent trend, tier-250 rate, avg events per registrant.
+  app.get(
+    '/api/reports/dept-insights',
+    { preHandler: [authenticate, requireRole('admin', 'overall', 'analyst')] },
+    async (request) => {
+      const { start, end, preset } = request.query as { start?: string; end?: string; preset?: Preset };
+
+      let dateRange: { start: string; end: string };
+      if (preset) dateRange = resolvePreset(preset);
+      else if (start && end) dateRange = { start, end };
+      else dateRange = resolvePreset('all');
+
+      const cacheKey = `dept-insights:${dateRange.start}:${dateRange.end}`;
+      return withCache(cacheKey, async () => {
+        // ── 1. Current period per-department stats ──
+        const currentResult = await query(
+          `SELECT
+             department,
+             COUNT(*) as total,
+             SUM(CASE WHEN registration_type = 250 THEN 1 ELSE 0 END) as tier250,
+             SUM(
+               (CASE WHEN event_1 IS NOT NULL AND event_1 != '' THEN 1 ELSE 0 END) +
+               (CASE WHEN event_2 IS NOT NULL AND event_2 != '' THEN 1 ELSE 0 END) +
+               (CASE WHEN event_3 IS NOT NULL AND event_3 != '' THEN 1 ELSE 0 END)
+             )::float / NULLIF(COUNT(*), 0) as avg_events
+           FROM registrations
+           WHERE registration_date BETWEEN $1 AND $2
+             AND department IS NOT NULL AND department != ''
+           GROUP BY department
+           ORDER BY total DESC`,
+          [dateRange.start, dateRange.end]
+        );
+
+        if (currentResult.rows.length === 0) {
+          return { success: true, dateRange, insights: [] };
+        }
+
+        // ── 2. Split period into two halves to compute trend ──
+        const startD = new Date(dateRange.start);
+        const endD   = new Date(dateRange.end);
+        const midD   = new Date((startD.getTime() + endD.getTime()) / 2);
+        const midStr = format(midD, 'yyyy-MM-dd');
+
+        const [recentResult, priorResult] = await Promise.all([
+          query(
+            `SELECT department, COUNT(*) as count
+             FROM registrations
+             WHERE registration_date BETWEEN $1 AND $2
+               AND department IS NOT NULL AND department != ''
+             GROUP BY department`,
+            [midStr, dateRange.end]
+          ),
+          query(
+            `SELECT department, COUNT(*) as count
+             FROM registrations
+             WHERE registration_date BETWEEN $1 AND $2
+               AND department IS NOT NULL AND department != ''
+             GROUP BY department`,
+            [dateRange.start, midStr]
+          ),
+        ]);
+
+        const recentMap = new Map<string, number>(
+          recentResult.rows.map((r: any) => [r.department, parseInt(r.count, 10)])
+        );
+        const priorMap = new Map<string, number>(
+          priorResult.rows.map((r: any) => [r.department, parseInt(r.count, 10)])
+        );
+
+        // ── 3. Global averages for normalisation ──
+        const allRows = currentResult.rows;
+        const totalRegistrations = allRows.reduce((s: number, r: any) => s + parseInt(r.total, 10), 0);
+        const globalTier250Rate  = allRows.reduce((s: number, r: any) => s + parseInt(r.tier250, 10), 0) / Math.max(1, totalRegistrations) * 100;
+        const globalAvgEvents    = allRows.reduce((s: number, r: any) => s + parseFloat(r.avg_events || '0'), 0) / Math.max(1, allRows.length);
+        const avgCountPerDept    = totalRegistrations / Math.max(1, allRows.length);
+
+        // ── 4. Score each department ──
+        const insights = allRows.map((r: any) => {
+          const dept    = r.department as string;
+          const total   = parseInt(r.total, 10);
+          const tier250 = parseInt(r.tier250, 10);
+          const avgEvt  = parseFloat(r.avg_events || '0');
+
+          const recent = recentMap.get(dept) ?? 0;
+          const prior  = priorMap.get(dept) ?? 0;
+          const trend  = prior > 0 ? Math.round(((recent - prior) / prior) * 100) : (recent > 0 ? 100 : 0);
+
+          const tier250Rate = total > 0 ? Math.round((tier250 / total) * 100) : 0;
+
+          // Signal scores (0–100 each, higher = more focus needed)
+          const countScore  = Math.max(0, Math.min(100, Math.round((1 - total / (avgCountPerDept * 2)) * 100)));
+          const trendScore  = trend >= 0 ? 0 : Math.min(100, Math.abs(trend));
+          const tierScore   = Math.max(0, Math.min(100, Math.round((globalTier250Rate - tier250Rate) * 2)));
+          const eventScore  = Math.max(0, Math.min(100, Math.round((globalAvgEvents - avgEvt) * 33)));
+
+          // Weighted composite focus score
+          const focusScore = Math.round(
+            countScore * 0.40 +
+            trendScore * 0.25 +
+            tierScore  * 0.20 +
+            eventScore * 0.15
+          );
+
+          // Status classification
+          let status: 'critical' | 'opportunity' | 'on-track';
+          let reason: string;
+          if (focusScore >= 60 || (trend <= -20 && total < avgCountPerDept)) {
+            status = 'critical';
+            reason = trend < 0
+              ? `Declining trend (${trend}%) with below-average registration count`
+              : `Significantly below-average registration count (${total} vs avg ${Math.round(avgCountPerDept)})`;
+          } else if (focusScore >= 30 || tier250Rate < globalTier250Rate - 10) {
+            status = 'opportunity';
+            reason = tier250Rate < globalTier250Rate - 10
+              ? `Low premium-tier conversion (${tier250Rate}% vs avg ${Math.round(globalTier250Rate)}%) — potential upsell opportunity`
+              : `Moderate engagement — could grow with targeted outreach`;
+          } else {
+            status = 'on-track';
+            reason = `Strong registration momentum${trend > 0 ? ` (+${trend}% trend)` : ''} — keep it up`;
+          }
+
+          return {
+            department: dept,
+            total,
+            tier250,
+            tier250Rate,
+            avgEvents: Math.round(avgEvt * 10) / 10,
+            trend,
+            recentCount: recent,
+            priorCount: prior,
+            focusScore,
+            status,
+            reason,
+          };
+        });
+
+        // Sort: critical first, then opportunity, then on-track; within each by focusScore desc
+        const order = { critical: 0, opportunity: 1, 'on-track': 2 };
+        insights.sort((a: any, b: any) =>
+          order[a.status as keyof typeof order] - order[b.status as keyof typeof order] ||
+          b.focusScore - a.focusScore
+        );
+
+        return {
+          success: true,
+          dateRange,
+          globalAvgTier250Rate: Math.round(globalTier250Rate),
+          globalAvgEvents: Math.round(globalAvgEvents * 10) / 10,
+          avgCountPerDept: Math.round(avgCountPerDept),
+          insights,
+        };
+      }, 300);
+    }
+  );
 }
