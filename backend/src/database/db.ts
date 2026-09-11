@@ -46,9 +46,17 @@ let appSettingsStore: Record<string, string> = {
   registration_goal: '500',
 };
 
+const isCi = process.env.CI === 'true';
+const hasExplicitDb = !!process.env.DATABASE_URL;
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://pyros:pyros_dev_2026@localhost:5432/registrations',
   connectionTimeoutMillis: 2000,
+});
+
+pool.on('error', () => {
+  isPostgresConnected = false;
+  postgresOffline = true;
 });
 
 /**
@@ -838,8 +846,8 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
   return { rows: [] };
 }
 
-let postgresOffline = false;
-let lastOfflineCheck = 0;
+let postgresOffline = isCi && !hasExplicitDb;
+let lastOfflineCheck = postgresOffline ? Date.now() : 0;
 
 function executeWithTimeout<T>(fn: () => Promise<T>, ms = 1500): Promise<T> {
   let timer: NodeJS.Timeout;
@@ -854,7 +862,7 @@ export async function query<T = any>(
   text: string,
   params: any[] = []
 ): Promise<{ rows: T[] }> {
-  if (postgresOffline && Date.now() - lastOfflineCheck < 30000) {
+  if (postgresOffline && (isCi && !hasExplicitDb || Date.now() - lastOfflineCheck < 30000)) {
     return handleMockQuery<T>(text, params);
   }
   try {
@@ -875,6 +883,11 @@ export async function query<T = any>(
 }
 
 export async function testConnection(): Promise<boolean> {
+  if (isCi && !hasExplicitDb) {
+    isPostgresConnected = false;
+    postgresOffline = true;
+    return false;
+  }
   try {
     const res = await executeWithTimeout(() => pool.query('SELECT 1'), 1500);
     isPostgresConnected = !!res.rowCount;
