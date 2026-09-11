@@ -838,17 +838,26 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
   return { rows: [] };
 }
 
+let postgresOffline = false;
+let lastOfflineCheck = 0;
+
 // Simple wrapper to match the exact pg API structure so we don't have to change route handlers
 export async function query<T = any>(
   text: string,
   params: any[] = []
 ): Promise<{ rows: T[] }> {
+  if (postgresOffline && Date.now() - lastOfflineCheck < 30000) {
+    return handleMockQuery<T>(text, params);
+  }
   try {
     const res = await pool.query(text, params);
     isPostgresConnected = true;
+    postgresOffline = false;
     return { rows: res.rows as T[] };
   } catch (err: any) {
     if (!isPostgresConnected) {
+      postgresOffline = true;
+      lastOfflineCheck = Date.now();
       // Execute in-memory live store fallback in offline/local development mode
       return handleMockQuery<T>(text, params);
     }
@@ -861,9 +870,12 @@ export async function testConnection(): Promise<boolean> {
   try {
     const res = await pool.query('SELECT 1');
     isPostgresConnected = !!res.rowCount;
+    postgresOffline = !isPostgresConnected;
     return isPostgresConnected;
   } catch {
     isPostgresConnected = false;
+    postgresOffline = true;
+    lastOfflineCheck = Date.now();
     return false;
   }
 }

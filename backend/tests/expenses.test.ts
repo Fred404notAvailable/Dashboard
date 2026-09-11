@@ -23,7 +23,7 @@ describe('Expenses Database and Calculations', () => {
         );
       }
     }
-  });
+  }, 30000);
 
   it('should query seeded mock expenses', async () => {
     const result = await query<{ id: string; title: string; amount: number; category: string }>(
