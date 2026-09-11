@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed": "tsx src/database/runSeed.ts",
-    "test": "vitest run"
+    "test": "vitest run --pool=threads"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
