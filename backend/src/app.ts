@@ -20,11 +20,18 @@ let syncPromise: Promise<any> | null = null;
 export async function buildApp(): Promise<FastifyInstance> {
   if (appInstance) return appInstance;
 
+  const isTest = process.env.NODE_ENV === 'test';
   const app = Fastify({
-    logger: {
-      level: config.nodeEnv === 'production' ? 'info' : 'debug',
-      transport: config.nodeEnv !== 'production' ? { target: 'pino-pretty' } : undefined,
-    },
+    logger: isTest
+      ? false
+      : {
+          level: config.nodeEnv === 'production' ? 'info' : 'debug',
+          transport: config.nodeEnv !== 'production' ? { target: 'pino-pretty' } : undefined,
+        },
+  });
+
+  app.addHook('onClose', () => {
+    appInstance = null;
   });
 
   // CORS
