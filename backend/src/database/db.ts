@@ -841,6 +841,14 @@ function handleMockQuery<T = any>(text: string, params: any[] = []): { rows: T[]
 let postgresOffline = false;
 let lastOfflineCheck = 0;
 
+function executeWithTimeout<T>(fn: () => Promise<T>, ms = 1500): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Database operation timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([fn(), timeout]).finally(() => clearTimeout(timer));
+}
+
 // Simple wrapper to match the exact pg API structure so we don't have to change route handlers
 export async function query<T = any>(
   text: string,
@@ -850,7 +858,7 @@ export async function query<T = any>(
     return handleMockQuery<T>(text, params);
   }
   try {
-    const res = await pool.query(text, params);
+    const res = await executeWithTimeout(() => pool.query(text, params), 1500);
     isPostgresConnected = true;
     postgresOffline = false;
     return { rows: res.rows as T[] };
@@ -868,7 +876,7 @@ export async function query<T = any>(
 
 export async function testConnection(): Promise<boolean> {
   try {
-    const res = await pool.query('SELECT 1');
+    const res = await executeWithTimeout(() => pool.query('SELECT 1'), 1500);
     isPostgresConnected = !!res.rowCount;
     postgresOffline = !isPostgresConnected;
     return isPostgresConnected;

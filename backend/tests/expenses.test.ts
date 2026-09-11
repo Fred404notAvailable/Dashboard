@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { query } from '../src/database/db.js';
+import { query, testConnection } from '../src/database/db.js';
 import { MOCK_EXPENSES } from '../src/database/mockData.js';
 
 describe('Expenses Database and Calculations', () => {
   let testUserId: string | null = null;
 
   beforeAll(async () => {
+    // Probe database connectivity first so fallback mode engages immediately if offline
+    await testConnection();
+
     // Find an existing user or fallback to null
     const userRes = await query<{ id: string }>('SELECT id FROM users LIMIT 1');
     if (userRes.rows.length > 0) {
