@@ -187,7 +187,7 @@ export function drawPdfReport(data: ReportData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
-      margins: { top: 36, bottom: 0, left: 36, right: 36 },
+      margins: { top: 36, bottom: 36, left: 36, right: 36 },
       autoFirstPage: true,
       bufferPages: true,
     });
@@ -238,8 +238,12 @@ export function drawPdfReport(data: ReportData): Promise<Buffer> {
     const datePillW = 165;
     const datePillX = doc.page.width - MARGIN - datePillW;
     doc.roundedRect(datePillX, 18, datePillW, 40, 4).fillAndStroke('#1E293B', GOLD);
+    // Truncate long preset labels so they fit the 165pt pill
+    const pillLabel = data.isSingleDay
+      ? 'REPORT DATE'
+      : (() => { const l = (data.presetLabel || 'CUSTOM').toUpperCase(); return l.length > 20 ? `PERIOD (${l.slice(0, 14)}…)` : `PERIOD (${l})`; })();
     doc.fillColor(GOLD).fontSize(7.5).font('Helvetica-Bold')
-      .text(data.isSingleDay ? 'REPORT DATE' : `PERIOD (${(data.presetLabel || 'CUSTOM').toUpperCase()})`, datePillX, 23, { width: datePillW, align: 'center' });
+      .text(pillLabel, datePillX, 23, { width: datePillW, align: 'center' });
     doc.fillColor('#FFFFFF').fontSize(8.5).font('Helvetica-Bold')
       .text(formattedDate, datePillX, 36, { width: datePillW, align: 'center' });
 
@@ -304,7 +308,7 @@ export function drawPdfReport(data: ReportData): Promise<Buffer> {
       payRows.forEach((r, idx) => {
         const bg = idx % 2 === 0 ? '#FFFFFF' : GRAY_BG;
         doc.rect(col1X, curY, colW, 14).fillAndStroke(bg, BORDER_COLOR);
-        const estRev = parseInt(r.est_revenue || '0', 10) || (parseInt(r.count, 10) * 250);
+        const estRev = parseInt(r.est_revenue || '0', 10);
         doc.fillColor(TEXT_PRIMARY).fontSize(7.5).font('Helvetica')
           .text(r.payment_method || 'Unknown', col1X + 6, curY + 3, { width: 100 })
           .text(String(r.count), col1X + 110, curY + 3, { width: 45, align: 'center' })
@@ -375,7 +379,9 @@ export function drawPdfReport(data: ReportData): Promise<Buffer> {
       });
     }
 
-    // ── 4. Bottom Table: Latest Registrations Roster (y = 316) ───────────────
+    // ── 4. Bottom Table: Latest Registrations Roster ─────────────────────────
+    const footerY = doc.page.height - 30; // defined early for the page-break guard below
+
     let tableY = Math.max(curY, eventY) + 12;
     const rosterTitle = data.isSingleDay
       ? `Registrations Roster (Showing ${data.recent.rows.length} records)`
@@ -405,14 +411,18 @@ export function drawPdfReport(data: ReportData): Promise<Buffer> {
           { key: 'events', label: 'REGISTERED EVENTS', width: 160, align: 'left' },
         ];
 
-    // Draw Table Header
-    doc.rect(MARGIN, tableY, USABLE_W, 15).fill('#E2E8F0');
-    let hx = MARGIN;
-    colDefs.forEach((col) => {
-      doc.fillColor(TEXT_PRIMARY).fontSize(7).font('Helvetica-Bold')
-        .text(col.label, hx + 4, tableY + 4, { width: col.width - 8, align: col.align as any });
-      hx += col.width;
-    });
+    // Helper: draw column header row at an arbitrary Y position (used on each page)
+    const drawColHeader = (y: number) => {
+      doc.rect(MARGIN, y, USABLE_W, 15).fill('#E2E8F0');
+      let hx = MARGIN;
+      colDefs.forEach((col) => {
+        doc.fillColor(TEXT_PRIMARY).fontSize(7).font('Helvetica-Bold')
+          .text(col.label, hx + 4, y + 4, { width: col.width - 8, align: col.align as any });
+        hx += col.width;
+      });
+    };
+
+    drawColHeader(tableY);
     tableY += 15;
 
     if (data.recent.rows.length === 0) {
@@ -427,6 +437,18 @@ export function drawPdfReport(data: ReportData): Promise<Buffer> {
         doc.fontSize(6.8);
         const eventsH = doc.heightOfString(eventsStr, { width: isSingle ? 170 : 152 });
         const rowHeight = Math.max(15, eventsH + 4);
+
+        // ── Page-break guard ────────────────────────────────────────────────
+        // If the next row would overlap the footer, open a new page and
+        // redraw the section header + column header before continuing.
+        if (tableY + rowHeight > footerY - 8) {
+          doc.addPage();
+          tableY = MARGIN;
+          drawHeader(`${rosterTitle} (cont.)`, MARGIN, tableY, USABLE_W);
+          tableY += 22;
+          drawColHeader(tableY);
+          tableY += 15;
+        }
 
         const bg = idx % 2 === 0 ? '#FFFFFF' : GRAY_BG;
         doc.rect(MARGIN, tableY, USABLE_W, rowHeight).fillAndStroke(bg, BORDER_COLOR);
@@ -504,13 +526,22 @@ export function drawPdfReport(data: ReportData): Promise<Buffer> {
       });
     }
 
-    // ── 5. Fixed Pinned Footer ───────────────────────────────────────────────
-    const footerY = doc.page.height - 30;
-    doc.rect(0, footerY - 4, doc.page.width, 34).fill(DARK);
-    doc.fillColor(GOLD).fontSize(7.5).font('Helvetica-Bold')
-      .text('FAC PYROS 2026', MARGIN, footerY + 6, { width: 150, lineBreak: false });
-    doc.fillColor('#94A3B8').fontSize(7).font('Helvetica')
-      .text(`Generated on ${format(new Date(), 'dd MMM yyyy HH:mm')} IST  •  Registration Analytics Dashboard`, MARGIN + 150, footerY + 6, { width: USABLE_W - 150, align: 'right', lineBreak: false });
+    // ── 5. Footer stamped on every page via bufferPages ──────────────────────
+    // bufferPages: true keeps all pages in memory so we can iterate and stamp
+    // the footer + page number on each page before flushing.
+    const totalPages = doc.bufferedPageRange().count;
+    for (let p = 0; p < totalPages; p++) {
+      doc.switchToPage(p);
+      doc.rect(0, footerY - 4, doc.page.width, 34).fill(DARK);
+      doc.fillColor(GOLD).fontSize(7.5).font('Helvetica-Bold')
+        .text('FAC PYROS 2026', MARGIN, footerY + 6, { width: 150, lineBreak: false });
+      doc.fillColor('#94A3B8').fontSize(7).font('Helvetica')
+        .text(
+          `Generated on ${format(new Date(), 'dd MMM yyyy HH:mm')} IST  •  Page ${p + 1} of ${totalPages}  •  Registration Analytics Dashboard`,
+          MARGIN + 150, footerY + 6,
+          { width: USABLE_W - 150, align: 'right', lineBreak: false }
+        );
+    }
 
     doc.end();
   });
@@ -590,8 +621,20 @@ export async function pdfRoutes(app: FastifyInstance) {
   );
 
   // GET /api/reports/daily/today — convenience alias
+  // GET /api/reports/daily/today — convenience alias handled directly
+  // (redirect is avoided because some HTTP clients drop the Authorization header on redirect)
   app.get('/api/reports/daily/today', { preHandler: [authenticate] }, async (request, reply) => {
     const today = format(new Date(), 'yyyy-MM-dd');
-    return reply.redirect(`/api/reports/daily/${today}`);
+    const user = (request as AuthedRequest).user!;
+    const reportData = await getReportData({ date: today });
+    if (reportData.totalCount === 0) {
+      return reply.status(404).send({ error: `No registrations found for ${today}` });
+    }
+    const pdfBuffer = await drawPdfReport(reportData);
+    const filename = `FAC_PYROS_Report_${today}.pdf`;
+    await auditLog(user.userId, 'pdf_download', `report:${today}`, { totalCount: reportData.totalCount });
+    reply.header('Content-Type', 'application/pdf');
+    reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+    return reply.send(pdfBuffer);
   });
 }
