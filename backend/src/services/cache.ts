@@ -68,7 +68,9 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds = DEFAULT
  */
 export async function cacheDel(key: string): Promise<void> {
   try {
-    await getRedis().del(key);
+    const client = getRedis();
+    if (!client) return;
+    await client.del(key);
   } catch {}
 }
 
@@ -79,6 +81,7 @@ export async function cacheDel(key: string): Promise<void> {
 export async function cacheDelPattern(pattern: string): Promise<void> {
   try {
     const client = getRedis();
+    if (!client) return;
     let cursor = '0';
     do {
       const [nextCursor, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', '100');

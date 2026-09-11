@@ -1233,9 +1233,9 @@ export default function DashboardPage() {
                           <YAxis tick={{ fill: '#666', fontSize: 10 }} />
                           <Tooltip
                             contentStyle={{ background: '#1A1A1A', border: `1px solid ${GOLD}80`, borderRadius: '8px', color: '#F5F5F5', fontSize: '0.8rem' }}
-                            formatter={(value: any, name: string) => [
+                            formatter={(value: any, name?: any) => [
                               value === null ? '—' : value,
-                              name === 'upper' ? '95% Upper' : name === 'lower' ? '95% Lower' : name
+                              name === 'upper' ? '95% Upper' : name === 'lower' ? '95% Lower' : (name ?? '')
                             ]}
                           />
                           <Legend wrapperStyle={{ fontSize: '0.75rem' }} />
