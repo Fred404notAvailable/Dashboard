@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { query, testConnection } from '../src/database/db.js';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { query, testConnection, closePool } from '../src/database/db.js';
 import { MOCK_EXPENSES } from '../src/database/mockData.js';
 
 describe('Expenses Database and Calculations', () => {
@@ -134,5 +134,9 @@ describe('Expenses Database and Calculations', () => {
 
     // 3. Clean up
     await query('DELETE FROM expenses WHERE id = $1', [item.id]);
+  });
+
+  afterAll(async () => {
+    await closePool();
   });
 });

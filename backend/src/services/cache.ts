@@ -109,3 +109,12 @@ export async function withCache<T>(
   await cacheSet(key, fresh, ttlSeconds);
   return fresh;
 }
+
+export async function closeRedis(): Promise<void> {
+  if (redis) {
+    try {
+      redis.disconnect();
+    } catch {}
+    redis = null;
+  }
+}

@@ -62,8 +62,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(forecastRoutes);
   await app.register(settingsRoutes);
 
-  // Trigger initial Google Sheets sync if not yet loaded
-  if (!syncPromise) {
+  // Trigger initial Google Sheets sync if not yet loaded (skip in unit test mode)
+  if (!syncPromise && process.env.NODE_ENV !== 'test') {
     syncPromise = performSync().catch((err) =>
       console.warn(`⚠️ [Sync] Initial sync warning: ${err.message}`)
     );

@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getReportData, drawPdfReport } from '../src/routes/pdf.js';
 import { buildApp } from '../src/app.js';
+import { closePool } from '../src/database/db.js';
+import { closeRedis } from '../src/services/cache.js';
 import { FastifyInstance } from 'fastify';
 
 describe('PDF Dynamic Timeframe Reports', () => {
@@ -103,5 +105,13 @@ describe('PDF Dynamic Timeframe Reports', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('application/pdf');
     expect(res.headers['content-disposition']).toBe('attachment; filename="FAC_PYROS_Report_2026-08-01_to_2026-08-31.pdf"');
+  });
+
+  afterAll(async () => {
+    if (app) {
+      await app.close();
+    }
+    await closePool();
+    await closeRedis();
   });
 });
